@@ -192,7 +192,7 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
                         }
                     }
                     if dataPin != nil {
-                        tempCall.append(CallModel(fPin: pin, name: dataPin!.fullName, image: dataPin!.thumb, time: timeCall, isVideo: text.lowercased().contains("audio") ? false : true, status: statusCall))
+                        tempCall.append(CallModel(fPin: pin, name: dataPin!.fullName, image: dataPin!.thumb, time: timeCall, isVideo: CallRecord.isVideo(text), status: statusCall))
                     }
                 }
                 calls = tempCall

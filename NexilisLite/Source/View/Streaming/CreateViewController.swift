@@ -28,7 +28,7 @@ class CreateViewController: UITableViewController {
         
         title = "Live Streaming".localized()
         
-        let cancel = UIBarButtonItem(barButtonSystemItem: .cancel, target: self, action: #selector(didTapCancel(sender:)))
+        let cancel = UIBarButtonItem.libCancel(target: self, action: #selector(didTapCancel(sender:)))
         
         navigationController?.navigationBar.barTintColor = UIColor.black
         

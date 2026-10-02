@@ -24,7 +24,9 @@ class VideoConferenceViewController: UIViewController {
     static private var bSpeakerPhone: Bool! = false
     private var tempSpeaker = false
     private var timerSpeaker: Timer?
-    static private var isLoop = false
+    /// See AudioEngineWatch. Fix: the engine was restarted by a loop nothing stopped before the
+    /// call was ended, so a restart could run into the SDK tearing the same engine down.
+    static private let audioWatch = AudioEngineWatch(label: "io.nexilis.VideoConferenceViewController.audioWatch")
     
     
     var dataPerson: [[String: String?]] = []
@@ -316,6 +318,8 @@ class VideoConferenceViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // A new call: its audio watch may run.
+        VideoConferenceViewController.audioWatch.arm()
         Nexilis.setWhiteboardReceiver(receiver: self)
         self.navigationController?.navigationBar.titleTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black]
         let navBarAppearance = UINavigationBarAppearance()
@@ -969,7 +973,7 @@ class VideoConferenceViewController: UIViewController {
     
     func endAllCall() {
         _ = Nexilis.write(message: CoreMessage_TMessageBank.endVCallConference(blog_id: roomId))
-        API.terminateCall(sParty: nil)
+        VideoConferenceViewController.audioWatch.stop { API.terminateCall(sParty: nil) }
         cameraView.image = nil
         zoomView.image = nil
         listRemoteViewFix.removeAll()
@@ -1130,13 +1134,12 @@ class VideoConferenceViewController: UIViewController {
             DispatchQueue.main.async {
                 self.buttonSpeaker.isEnabled = false
             }
-            VideoConferenceViewController.isLoop = true
+            VideoConferenceViewController.audioWatch.start()
             DispatchQueue.global(qos: .userInitiated).async {
                 var countLoop = 0
                 repeat {
                     Thread.sleep(forTimeInterval : 0.5)
-                    if (VideoConferenceViewController.isLoop && !API.bAudioEngineIsRunning()) {
-                        API.restartAudioEngine()
+                    if VideoConferenceViewController.audioWatch.restartIfNeeded() {
                         DispatchQueue.main.async {
                             if !self.buttonSpeaker.isEnabled{
                                 self.setSpeaker()
@@ -1160,7 +1163,7 @@ class VideoConferenceViewController: UIViewController {
                             }
                         }
                     }
-                } while (VideoConferenceViewController.isLoop)
+                } while (VideoConferenceViewController.audioWatch.isRunning)
             }
         }
         else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
@@ -1380,7 +1383,7 @@ class VideoConferenceViewController: UIViewController {
                     if controller != nil {
                         controller!.dismiss(animated: true)
                     }
-                    VideoConferenceViewController.isLoop = false
+                    VideoConferenceViewController.audioWatch.stop()
                     VideoConferenceViewController.bSpeakerPhone = false
                     do { try AVAudioSession.sharedInstance().setActive(false) } catch {}
                     Nexilis.callAPNActivated = false

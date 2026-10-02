@@ -61,7 +61,7 @@ public class CommunityNew: UIViewController, UITextFieldDelegate  {
     }
     
     func setUpHeader() {
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancel(sender:)))
+        navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(cancel(sender:)))
         self.navigationController?.navigationController?.setNavigationBarHidden(true, animated: false)
         self.navigationController?.navigationBar.titleTextAttributes = [NSAttributedString.Key.foregroundColor: self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black]
         let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black, NSAttributedString.Key.font : UIFont.boldSystemFont(ofSize: 16)]

@@ -43,7 +43,7 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
         if !isPersonal {
             self.title = "Notification Message(s) Group".localized()
         }
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancel(sender:)))
+        navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(cancel(sender:)))
         
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Save".localized(), style: .plain, target: self, action: #selector(save(sender:)))
         data.append(NotifSound(id: 001, name: "Nexilis Message (Default)", isSelected: false))

@@ -46,7 +46,7 @@ public class ScannerViewController: UIViewController, QRScannerViewDelegate {
         navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
 
         self.title = "Scan QR Code".localized()
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancel(sender:)))
+        navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(cancel(sender:)))
         
         self.view.addSubview(scannerView)
         self.view.addSubview(titleInfo)

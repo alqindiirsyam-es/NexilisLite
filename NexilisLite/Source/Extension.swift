@@ -567,6 +567,20 @@ extension NSObject {
               indexPath.row >= 0, indexPath.row < tableView.numberOfRows(inSection: indexPath.section) else {
             return
         }
+        // Those are the table's cached counts. reloadRows asks the DATA SOURCE again while it commits the
+        // update, and a list that has already changed - a search typed, a segment switched, a fresh load -
+        // answers with fewer rows than the table still believes it has. UIKit then raises
+        // "Invalid update / invalid index path", which is a crash (SIGABRT) started by nothing more than a
+        // picture finishing its download. Asked of the data source too, so the two agree before the reload.
+        if let source = tableView.dataSource {
+            let sections = source.numberOfSections?(in: tableView) ?? 1
+            guard indexPath.section < sections,
+                  indexPath.row < source.tableView(tableView, numberOfRowsInSection: indexPath.section) else {
+                return
+            }
+        }
+        // A row nobody can see has nothing to redraw: it is built afresh from cellForRow when it scrolls in.
+        guard tableView.indexPathsForVisibleRows?.contains(indexPath) == true else { return }
         tableView.reloadRows(at: [indexPath], with: .none)
     }
 
@@ -645,7 +659,11 @@ extension NSObject {
                 let image = prepareImage(UIImage(contentsOfFile: file.path),
                                          isResized: isResized, isCircle: isCircle,
                                          targetSize: drawnSize, key: cacheKey)
-                completion(true, false, image)
+                // A file that is there but will not decode - a download that was cut short, an empty
+                // file left behind - used to hand the caller nil, and the caller drew nothing: a row
+                // with no avatar at all rather than the placeholder one. The placeholder is what a
+                // missing picture looks like, whether the file is absent or unreadable.
+                completion(true, false, image ?? placeholderImage)
                 return
             }
             if var tempData = try? FileEncryption.shared.readSecure(filename: url) {
@@ -655,7 +673,7 @@ extension NSObject {
                 let image = prepareImage(UIImage(data: tempData),
                                          isResized: isResized, isCircle: isCircle,
                                          targetSize: drawnSize, key: cacheKey)
-                completion(true, false, image)
+                completion(true, false, image ?? placeholderImage)
                 return
             }
             
@@ -1324,7 +1342,9 @@ public final class LocalizedStrings {
         }
         // we set a default, just in case
         let langDefault = UserDefaults.standard.stringArray(forKey: "AppleLanguages")
-        let fallback = (langDefault?.first?.contains("id") ?? false) ? "id" : "en"
+        // Match the language subtag, not the region (e.g. en-ID is English).
+        let languageCode = Locale(identifier: langDefault?.first ?? "en").languageCode
+        let fallback = languageCode == "id" ? "id" : "en"
         SecureUserDefaults.shared.set(fallback, forKey: "i18n_language")
         return fallback
     }
@@ -1540,6 +1560,25 @@ extension String {
         return CGFloat(fontSize)
     }
     
+    /// What a message's text has already been worked out to look like.
+    ///
+    /// Formatting one message is five passes of a regular expression over it, a paragraph pass,
+    /// and - where it names somebody - a database lookup per mention. None of that can come out
+    /// differently for the same text asked the same way, and a bubble is drawn again every time
+    /// it comes back on screen. Held by everything the answer depends on, so the same message
+    /// shown a second time is formatted once.
+    ///
+    /// The appearance is part of that: a mention is drawn in a colour that is worked out for the
+    /// theme in force when the text is built, not resolved again at drawing time.
+    ///
+    /// Only the drawing paths are kept. Text being edited changes on every keystroke, so holding
+    /// those would be a cache of answers nobody asks for twice.
+    private static let richTextCache: NSCache<NSString, NSAttributedString> = {
+        let cache = NSCache<NSString, NSAttributedString>()
+        cache.countLimit = 400
+        return cache
+    }()
+
     public func richText(
         fontSize: CGFloat = 12 + String.offset(),
         isEditing: Bool = false,
@@ -1548,7 +1587,14 @@ extension String {
         group_id: String = "",
         listMentionInTextField: [User] = []
     ) -> NSMutableAttributedString {
-        
+        let cacheKey: NSString? = isEditing ? nil
+            : "\(fontSize)|\(isSearching)|\(textSearch)|\(group_id)|\(UITraitCollection.current.userInterfaceStyle.rawValue)|\(self)" as NSString
+        if let cacheKey = cacheKey, let formatted = String.richTextCache.object(forKey: cacheKey) {
+            // A copy, because what is handed back is a mutable string and the callers treat it
+            // as theirs - one of them appends a link to it.
+            return NSMutableAttributedString(attributedString: formatted)
+        }
+
         let font = UIFont.systemFont(ofSize: fontSize)
         let boldFont = UIFont.boldSystemFont(ofSize: fontSize)
         let italicFont = UIFont.italicSystemFont(ofSize: fontSize)
@@ -1580,6 +1626,9 @@ extension String {
             highlightSearchText(in: finalText, searchText: textSearch)
         }
         
+        if let cacheKey = cacheKey {
+            String.richTextCache.setObject(NSAttributedString(attributedString: finalText), forKey: cacheKey)
+        }
         return finalText
     }
 
@@ -1783,15 +1832,20 @@ extension String {
                         // a person without re-parsing the string or matching on the colour -
                         // the colour is a look, and looks change.
                         text.addAttribute(.mentionPin, value: username, range: newRange)
+                        // "@me": on a light ground of the mention colour, so a reader sees at a
+                        // glance where they were called on.
+                        if username == User.getMyPin() {
+                            text.addAttribute(.mentionHighlight, value: UIColor.mentionColor.withAlphaComponent(0.16), range: newRange)
+                        }
                     }
                 }
             }
         }
     }
 
+    /// Lights up what the search found - see ChatSearchMatch for the rule.
     private func highlightSearchText(in text: NSMutableAttributedString, searchText: String) {
-        let range = (text.string as NSString).range(of: searchText, options: .caseInsensitive)
-        if range.location != NSNotFound {
+        for range in ChatSearchMatch.ranges(in: text.string, query: searchText) {
             text.addAttribute(.backgroundColor, value: UIColor.systemYellow, range: range)
         }
     }
@@ -1810,6 +1864,11 @@ public extension NSAttributedString.Key {
     /// who is not in this group is left as plain text and stays untappable, which is the same
     /// rule the colour follows.
     static let mentionPin = NSAttributedString.Key("nexilisMentionPin")
+
+    /// A mention of the reader themselves, drawn on a rounded ground of this colour behind it - the
+    /// way WhatsApp marks "@you". A text view that knows the key draws it (PressableTextView); one
+    /// that does not simply ignores it.
+    static let mentionHighlight = NSAttributedString.Key("nexilisMentionHighlight")
 }
 
 /// Names behind the pins that mentions are stored as.
@@ -2421,27 +2480,105 @@ public class ImageCache {
     }
 }
 
+/// Holds a sheet's rows to the framework's face for as long as the sheet is on screen.
+///
+/// It stands between the display link and the sheet because a display link holds its target,
+/// and a sheet held by the thing that watches it is a sheet that is never let go.
+private final class LibFaceWatch: NSObject {
+    weak var sheet: LibAlertController?
+
+    @objc func tick() {
+        sheet?.keepFace()
+    }
+}
+
 public class LibAlertController: UIAlertController {
+    /// The size an action's title is drawn at, and the face it must keep.
+    private static let actionFontSize: CGFloat = 16
+    private var faceWatch: CADisplayLink?
+
     public override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        
-        // Customize the title's font
-        let titleFont = UIFont.boldSystemFont(ofSize: 16)
-        let titleAttributes = [NSAttributedString.Key.font: titleFont]
-        setValue(NSAttributedString(string: self.title ?? "", attributes: titleAttributes), forKey: "attributedTitle")
-        
-        // Change the font for the message
-        let messageFont = UIFont.systemFont(ofSize: 14)
-        let messageAttributes = [NSAttributedString.Key.font: messageFont]
-        setValue(NSAttributedString(string: self.message ?? "", attributes: messageAttributes), forKey: "attributedMessage")
-        
-        for i in self.actions {
-            let attributedText = NSAttributedString(string: i.title ?? "", attributes: [NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)])
 
-            guard let label = (i.value(forKey: "__representer") as AnyObject).value(forKey: "label") as? UILabel else { return }
-            label.attributedText = attributedText
+        // The title and the message are ours to write, and nothing rewrites them afterwards.
+        setValue(NSAttributedString(string: title ?? "",
+                                    attributes: [.font: UIFont.boldSystemFont(ofSize: 16)]),
+                 forKey: "attributedTitle")
+        setValue(NSAttributedString(string: message ?? "",
+                                    attributes: [.font: UIFont.systemFont(ofSize: 14)]),
+                 forKey: "attributedMessage")
+        dressActions()
+    }
+
+    /// Fix: the face was put on the action rows once, in viewWillAppear, and it was put on as
+    /// `attributedText` over a label that belongs to UIKit. UIKit writes that label again from
+    /// its own model whenever the row changes state - and a finger touching a row is a change of
+    /// state - so a row came up in the framework's face and went back to the system's the moment
+    /// it was tapped. That is the bug the reader saw. Putting it on again after every layout is
+    /// what keeps it: a row UIKit has just rewritten is rewritten back before it is drawn.
+    ///
+    /// Also fixed here: the rows are only built as the sheet lays itself out, so viewWillAppear
+    /// could run before any of them existed - and then no row was ever dressed at all.
+    public override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        dressActions()
+    }
+
+    /// Fix: laying the sheet out again was not enough, and the reader was right - press and hold
+    /// a row and it still changed face. UIKit rewrites that row's label while the finger rests on
+    /// it and lays nothing out to do it, so there is no call of ours for the rewrite to be caught
+    /// in: no layout, no state change we are told about, nothing. While the sheet is on screen the
+    /// rows are looked at once a frame instead. Nothing is written unless the face is actually
+    /// wrong, so a sheet nobody is touching costs a handful of comparisons a frame and no drawing
+    /// at all; a row that has just been rewritten is put back inside the same frame.
+    public override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        let watch = LibFaceWatch()
+        watch.sheet = self
+        let link = CADisplayLink(target: watch, selector: #selector(LibFaceWatch.tick))
+        // .common, or the rows stop being watched for as long as a finger is down - which is
+        // exactly when they need watching.
+        link.add(to: .main, forMode: .common)
+        faceWatch = link
+    }
+
+    public override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        faceWatch?.invalidate()
+        faceWatch = nil
+    }
+
+    deinit {
+        faceWatch?.invalidate()
+    }
+
+    fileprivate func keepFace() {
+        dressActions()
+    }
+
+    /// Writes the framework's face onto any action row that is not already wearing it.
+    ///
+    /// Only onto rows that need it: writing an attributed string asks for another layout, and a
+    /// layout that always writes is a layout that never settles.
+    private func dressActions() {
+        let face = UIFont.systemFont(ofSize: LibAlertController.actionFontSize)
+        for action in actions {
+            // Fix: this was a `guard ... else { return }` inside the loop, so the first action
+            // whose row UIKit had not built yet ended the loop and left every action after it in
+            // the system face.
+            guard let representer = action.value(forKey: "__representer") as? NSObject,
+                  let label = representer.value(forKey: "label") as? UILabel else {
+                continue
+            }
+            if let worn = label.font, worn.fontName == face.fontName, worn.pointSize == face.pointSize {
+                continue
+            }
+            // The colour is UIKit's - a destructive action is red, a disabled one grey - and
+            // writing the string plainly used to take that away with it.
+            label.attributedText = NSAttributedString(string: action.title ?? "",
+                                                      attributes: [.font: face,
+                                                                   .foregroundColor: label.textColor as Any])
         }
-
     }
 }
 

@@ -75,44 +75,33 @@ public class HistoryCCViewController: UITableViewController, QLPreviewController
             return cellNoData
         }
         let cell = tableView.dequeueReusableCell(withIdentifier: "cellHistoryCC", for: indexPath) as! CellMyHistory
-        let dataOfficer = getDataProfile(f_pin: data[indexPath.row]["officer"] as? String ?? "")
-        let dataRequester = getDataProfile(f_pin: data[indexPath.row]["requester"] as? String ?? "")
+        // Fix: every card said both who the officer was and who the requester was, and one of the
+        // two is always the reader. Only the other side is named now: the officer on a
+        // requester's own history, the requester on an officer's. Below it, how the session
+        // ended - Completed or Pending - the way Android shows it.
+        let row = data[indexPath.row]
+        let officerPin = row["officer"] as? String ?? ""
+        let requesterPin = row["requester"] as? String ?? ""
+        let iAmOfficer = !officerPin.isEmpty && officerPin == User.getMyPin()
+        let otherPin = iAmOfficer ? requesterPin : officerPin
+        let other = getDataProfile(f_pin: otherPin)
+        let role = (iAmOfficer ? "Requester" : "Officer").localized()
+        let otherName = (other["name"] ?? "").isEmpty ? "User" : (other["name"] ?? "")
+        cell.labelOfficer.text = role + " : " + otherName
         cell.imageOfficer.image = nil
-        if dataOfficer.count > 0 {
-            if isOfficer {
-                cell.labelOfficer.text = dataRequester["name"] ?? ""
-            } else {
-                cell.labelOfficer.text = "Officer".localized() + " : " + (dataOfficer["name"] ?? "")
-            }
-            if !(dataOfficer["image"] ?? "").isEmpty || !(dataRequester["image"] ?? "").isEmpty {
-                if isOfficer {
-                    getImage(name: dataRequester["image"] ?? "", placeholderImage: UIImage(systemName: "person.circle.fill")!, isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
-                        cell.imageOfficer.image = image
-                    }
-                } else {
-                    getImage(name: dataOfficer["image"] ?? "", placeholderImage: UIImage(systemName: "person.circle.fill")!, isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
-                        cell.imageOfficer.image = image
-                    }
-                }
-            } else {
-                cell.imageOfficer.image = UIImage(systemName: "person.circle.fill")!
-                cell.imageOfficer.tintColor = .lightGray
+        if !(other["image"] ?? "").isEmpty {
+            getImage(name: other["image"] ?? "", placeholderImage: UIImage(systemName: "person.circle.fill")!, isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                cell.imageOfficer.image = image
             }
         } else {
-            if isOfficer {
-                cell.labelOfficer.text = "User"
-            } else {
-                cell.labelOfficer.text = "Officer".localized() + " : User"
-            }
+            cell.imageOfficer.image = UIImage(systemName: "person.circle.fill")!
+            cell.imageOfficer.tintColor = .lightGray
         }
-        if isOfficer {
-            cell.labelRequester.isHidden = true
-        } else {
-            if dataRequester.count > 0 {
-                cell.labelRequester.text = "Requester".localized() + " : " + dataRequester["name"]!
-            } else {
-                cell.labelRequester.text = "Requester".localized() + " : User"
-            }
+        cell.labelRequester.isHidden = false
+        cell.labelRequester.attributedText = statusLine(ticket: row["complaint_id"] as? String ?? "", font: cell.labelRequester.font)
+        // The header names the kind of session, so a call reads as one before it is opened.
+        if let header = cell.viewTitle.subviews.compactMap({ $0 as? UILabel }).first {
+            header.text = HistoryCCViewController.sessionTitle(channel: row["type"] as? String ?? "")
         }
         cell.labelComplaintId.text = data[indexPath.row]["complaint_id"] as? String ?? ""
         let stringDate = data[indexPath.row]["date_start"] as? String ?? ""
@@ -133,6 +122,26 @@ public class HistoryCCViewController: UITableViewController, QLPreviewController
     
     public override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
         return 120
+    }
+
+    /// "Call Center", or which kind of call it was.
+    static func sessionTitle(channel: String) -> String {
+        switch channel {
+        case "1": return "Call Center".localized() + " · " + "Audio call".localized()
+        case "2": return "Call Center".localized() + " · " + "Video call".localized()
+        default: return "Call Center".localized()
+        }
+    }
+
+    /// "Status : Completed" in green, or "Status : Pending" in orange.
+    private func statusLine(ticket: String, font: UIFont?) -> NSAttributedString {
+        let pending = ContactCenterSession.endStatus(ticket: ticket) == ContactCenterSession.pending
+        let line = NSMutableAttributedString(string: "Status".localized() + " : ",
+            attributes: [.foregroundColor: UIColor.label, .font: font ?? UIFont.systemFont(ofSize: 15)])
+        line.append(NSAttributedString(string: (pending ? "Pending" : "Completed").localized(),
+            attributes: [.foregroundColor: pending ? UIColor.systemOrange : UIColor.systemGreen,
+                         .font: font ?? UIFont.systemFont(ofSize: 15)]))
+        return line
     }
     
     func getData() {
@@ -176,6 +185,16 @@ public class HistoryCCViewController: UITableViewController, QLPreviewController
         let editorGroupVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "editorGroupVC") as! EditorGroup
         editorGroupVC.isHistoryCC = true
         editorGroupVC.complaintId = data[sender.tag]["complaint_id"] as! String
+        // A session held as a call shows that call in its history as well.
+        let row = data[sender.tag]
+        let channel = row["type"] as? String ?? ""
+        if channel == "1" || channel == "2" {
+            editorGroupVC.historyCall = (isVideo: channel == "2",
+                                         start: Int64(row["date_start"] as? String ?? "") ?? 0,
+                                         end: Int64(row["date_end"] as? String ?? "") ?? 0,
+                                         officer: row["officer"] as? String ?? "",
+                                         requester: row["requester"] as? String ?? "")
+        }
         navigationController?.show(editorGroupVC, sender: nil)
     }
     
@@ -285,7 +304,7 @@ public class HistoryCCViewController: UITableViewController, QLPreviewController
         UIGraphicsEndPDFContext();
         
         // 5. Save PDF file
-        guard let outputURL = try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false).appendingPathComponent("ContactCenter-\(Date().currentTimeMillis())").appendingPathExtension("pdf")
+        guard let outputURL = try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false).appendingPathComponent("CallCenter-\(Date().currentTimeMillis())").appendingPathExtension("pdf")
             else { fatalError("Destination URL not created") }
         
         pdfData.write(to: outputURL, atomically: true)

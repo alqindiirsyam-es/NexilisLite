@@ -50,8 +50,7 @@ class LiteBootstrapFormViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain,
-                                                           target: self, action: #selector(cancel))
+        navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(cancel))
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Submit".localized(), style: .plain,
                                                             target: self, action: #selector(submitTapped))
         let tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
@@ -163,7 +162,7 @@ class LiteBootstrapFormViewController: UIViewController {
     /// window, which sits below the form's (.alert + 5), so the reader never saw it.
     func showFailure(_ text: String) {
         NXLogger.general.publicInfo("[BootstrapAuth] alert gagal ditampilkan")
-        let alert = UIAlertController(title: "Sign-in gagal", message: text, preferredStyle: .alert)
+        let alert = LibAlertController(title: "Sign-in gagal", message: text, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         var top: UIViewController = navigationController ?? self
         while let presented = top.presentedViewController, !presented.isBeingDismissed { top = presented }
@@ -175,9 +174,39 @@ class LiteBootstrapFormViewController: UIViewController {
         top.present(alert, animated: true)
     }
 
+    /// The same MFA security page as the connected flow, presented on the form's
+    /// own window above Sentinel. Never opens Contact Center before the asset unlocks.
+    func showMfaSecurityFailure(_ text: String, count: Int? = nil,
+                                retry: @escaping () -> Void, passwordFallback: (() -> Void)? = nil) {
+        let dialog = DialogErrorMFA()
+        dialog.errorDesc = text
+        dialog.method = "Sign In"
+        dialog.modalTransitionStyle = .crossDissolve
+        dialog.modalPresentationStyle = .overCurrentContext
+        if let count {
+            dialog.countRetry = count
+        } else {
+            dialog.contentMessage = passwordFallback == nil
+                ? "Silakan coba lagi."
+                : "Biometrik gagal atau dibatalkan. Coba lagi atau gunakan password untuk melanjutkan."
+        }
+        if let passwordFallback {
+            dialog.secondaryActionTitle = "Gunakan Password"
+            dialog.onSecondaryAction = passwordFallback
+        }
+        dialog.isDismiss = { [weak self] result in
+            if result == 1 { retry() }
+            else { self?.closeApp("dialog MFA ditutup") }
+        }
+        var top: UIViewController = navigationController ?? self
+        while let presented = top.presentedViewController, !presented.isBeingDismissed { top = presented }
+        guard !(top is DialogErrorMFA) else { return }
+        top.present(dialog, animated: true)
+    }
+
     /// Lite's "Please wait..." loader, presented from this form's own window.
     private func showLoader() {
-        let alert = UIAlertController(title: nil, message: "Please wait...".localized(), preferredStyle: .alert)
+        let alert = LibAlertController(title: nil, message: "Please wait...".localized(), preferredStyle: .alert)
         let spinner = UIActivityIndicatorView(frame: CGRect(x: 10, y: 5, width: 50, height: 50))
         spinner.style = .medium
         spinner.startAnimating()
@@ -192,7 +221,7 @@ class LiteBootstrapFormViewController: UIViewController {
         loader.dismiss(animated: true, completion: then)
     }
 
-    private func setBusy(_ value: Bool) {
+    fileprivate func setBusy(_ value: Bool) {
         busy = value
         navigationItem.rightBarButtonItem?.isEnabled = !value
     }
@@ -226,14 +255,25 @@ class LiteBootstrapFormViewController: UIViewController {
         // timer (lastAuthenticationTime + authentication_duration, 30 s by default): right after the form's
         // own prompt it does not ask again.
         let justVerified = verifiedAt != 0 && ProcessInfo.processInfo.systemUptime - verifiedAt < 15
-        let promptForKey = identity.hsa && !justVerified
+        // Email OTP already follows the explicit biometric gate at Submit email. Its signed
+        // request must not insert a third prompt between the OTP and MFA screens.
+        let promptForKey = identity.hsa && !justVerified && operation != "otp/verify"
         var request = request
         let common = commonRequest()
         NXLogger.general.publicInfo("[BootstrapAuth] \(operation) dikirim ke \(LiteBootstrapAuth.baseURL.host ?? "?")")
         Task.detached {
             do {
                 if deviceProof {
-                    if LiteBootstrapDeviceProof.hasDeviceKey {
+                    let isMiddleFirstInstall = operation == "sign-in/prepare"
+                    if isMiddleFirstInstall {
+                        guard identity.middle, !identity.returningUser else {
+                            throw LiteBootstrapError("Enrollment Middle hanya untuk sign-in awal mode 2.")
+                        }
+                        // SUAI02 uses the legacy FPR + PUK enrollment contract. Its signature branch
+                        // reads a socket challenge, which does not exist before the asset opens.
+                        try LiteBootstrapDeviceProof.add(to: &request, challenge: nil, hsa: false,
+                                                          middleEnrollment: true)
+                    } else if LiteBootstrapDeviceProof.hasDeviceKey {
                         var challengeRequest = common
                         challengeRequest[LiteBootstrapKeys.account] = identity.fPin
                         let challenge = try await client.challenge(challengeRequest)
@@ -243,7 +283,8 @@ class LiteBootstrapFormViewController: UIViewController {
                         guard let requestID = challenge["request_id"] as? String, !requestID.isEmpty else {
                             throw LiteBootstrapError("Request ID challenge tidak tersedia.")
                         }
-                        try LiteBootstrapDeviceProof.add(to: &request, challenge: challenge[LiteBootstrapKeys.challenge] as? String,
+                        try LiteBootstrapDeviceProof.add(to: &request,
+                                                          challenge: challenge[LiteBootstrapKeys.challenge] as? String,
                                                           hsa: promptForKey)
                         request["BOOTSTRAP_REQUEST_ID"] = requestID
                     } else {
@@ -256,10 +297,19 @@ class LiteBootstrapFormViewController: UIViewController {
                 case "otp/send": response = try await client.sendOtp(request)
                 case "otp/verify": response = try await client.verifyOtp(request)
                 case "tfa": response = try await client.tfa(request)
+                case "sign-in/prepare": response = try await client.signInPrepare(request)
                 default: throw LiteBootstrapError("Operasi autentikasi tidak dikenal.")
                 }
                 // The code only: never the body, which can carry the assertion and profile data.
-                NXLogger.general.publicInfo("[BootstrapAuth] \(operation) dijawab A97=\(response[LiteBootstrapKeys.code] as? String ?? "-")")
+                let answered = response[LiteBootstrapKeys.code] as? String ?? "-"
+                if answered == "00" {
+                    NXLogger.general.publicInfo("[BootstrapAuth] \(operation) dijawab A97=00")
+                } else {
+                    // The server's own words for the refusal - the business message, never the body.
+                    let detail = (response[LiteBootstrapKeys.message] as? String ?? "").prefix(160)
+                    let sub = response["A97A"] as? String ?? "-"
+                    NXLogger.general.publicError("[BootstrapAuth] \(operation) ditolak A97=\(answered) A97A=\(sub) A07=\(detail)")
+                }
                 await MainActor.run {
                     self.setBusy(false)
                     self.hideLoader { self.onBusinessResponse(operation, response) }
@@ -335,10 +385,17 @@ class LiteBootstrapFormViewController: UIViewController {
     /// `authentication_duration` (30 s by default), recorded in `lastAuthenticationTime` when it runs - so the
     /// device key, the master key and Lite's own screens that follow within the window ask nothing more.
     /// The evaluated context is handed to MasterKeyUtil for the biometric-bound master key read at connect.
-    func biometric(_ reason: String, success: @escaping () -> Void, failure: @escaping (LAError.Code?) -> Void) {
+    func biometric(_ reason: String, forcePrompt: Bool = false, saveState: Bool = false,
+                   success: @escaping () -> Void, failure: @escaping (LAError.Code?) -> Void) {
         // Utils.authenticateWithBiometrics is the timer (skips inside the window, records a success) and
         // shares the confirmation with the master key; the form uses it rather than a prompt of its own.
-        Utils.authenticateWithBiometrics { ok, _ in
+        if forcePrompt {
+            verifiedAt = 0
+            SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
+            MasterKeyUtil.shared.invalidateAuthentication()
+        }
+        Utils.authenticateWithBiometrics(isSaveState: saveState,
+                                         verifySavedState: identity.middle && !saveState) { ok, _ in
             DispatchQueue.main.async {
                 if ok { self.verifiedAt = ProcessInfo.processInfo.systemUptime; success() } else { failure(nil) }
             }
@@ -348,14 +405,16 @@ class LiteBootstrapFormViewController: UIViewController {
 
 // MARK: - Login (never signed in on this install) - SignUpSignIn
 
-final class LiteBootstrapLoginViewController: LiteBootstrapFormViewController {
+class LiteBootstrapLoginViewController: LiteBootstrapFormViewController {
     private let prompt = UILabel()
-    private let user = UITextField()
-    private let password = PasswordTextField()
+    fileprivate let user = UITextField()
+    fileprivate let password = PasswordTextField()
     private lazy var eye = eyeButton(for: password)
     private let disclaimer = UILabel()
     private var invalidOtpCount = 0
     private var pendingEmail = ""
+    /// The explicit choice made on this email attempt; nil means use the mode's existing policy.
+    private var emailBiometricChoice: Bool?
     /// The password of a username login, kept in memory only until its /tfa stage has been sent.
     private var pendingSecret = ""
 
@@ -380,7 +439,7 @@ final class LiteBootstrapLoginViewController: LiteBootstrapFormViewController {
         prompt.textAlignment = .center
         prompt.numberOfLines = 0
 
-        user.placeholder = "Your Nickname".localized()
+        user.placeholder = "Your NickName/Email".localized()
         user.borderStyle = .roundedRect
         user.font = .systemFont(ofSize: 14)
         user.autocapitalizationType = .none
@@ -437,13 +496,13 @@ final class LiteBootstrapLoginViewController: LiteBootstrapFormViewController {
         ])
     }
 
-    private func isEmail(_ value: String) -> Bool {
+    fileprivate func isEmail(_ value: String) -> Bool {
         value.range(of: "^[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64}$", options: .regularExpression) != nil
     }
 
     /// An e-mail signs in by OTP: no password, no nickname disclaimer - as SignUpSignIn's e-mail mode.
     @objc private func userChanged() {
-        let email = isEmail(user.text ?? "")
+        let email = isEmail((user.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
         password.isHidden = email
         eye.isHidden = email
         disclaimer.isHidden = email || signInOnly
@@ -454,11 +513,7 @@ final class LiteBootstrapLoginViewController: LiteBootstrapFormViewController {
         let name = (user.text ?? "").trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { showFailure("Username/email wajib diisi."); return }
         if isEmail(name) {
-            pendingEmail = name
-            var request = commonRequest()
-            request[LiteBootstrapKeys.email] = name
-            request[LiteBootstrapKeys.businessEntity] = LiteBootstrapAuth.businessEntityKey
-            execute("otp/send", request, deviceProof: false)
+            beginEmailLogin(name)
             return
         }
         guard name.range(of: "^[a-zA-Z0-9 ]*$", options: .regularExpression) != nil else {
@@ -483,21 +538,62 @@ final class LiteBootstrapLoginViewController: LiteBootstrapFormViewController {
         execute("login", request, deviceProof: true)
     }
 
+    private func beginEmailLogin(_ email: String) {
+        pendingEmail = email
+        emailBiometricChoice = nil
+        if identity.hsa {
+            guard biometricAvailable else { showFailure("Biometrik wajib tersedia untuk mode 1."); return }
+            biometric("Confirm Identity", forcePrompt: true, success: { [weak self] in
+                self?.emailBiometricChoice = true
+                self?.sendEmailOtp()
+            }, failure: { [weak self] _ in self?.showFailure("Autentikasi biometrik dibatalkan atau gagal.") })
+            return
+        }
+        let sheet = UIAlertController(title: "Biometrik (Opsional)",
+                                      message: "Pakai Face ID / Touch ID untuk Sign-In berikutnya?",
+                                      preferredStyle: .alert)
+        sheet.addAction(UIAlertAction(title: "Ya", style: .default) { [weak self] _ in
+            guard let self else { return }
+            guard self.biometricAvailable else {
+                self.showFailure("Biometrik tidak tersedia; pilih Tidak untuk melanjutkan.")
+                return
+            }
+            self.biometric("Confirm Identity", forcePrompt: true, saveState: true, success: {
+                self.emailBiometricChoice = true
+                self.sendEmailOtp()
+            }, failure: { _ in self.showFailure("Autentikasi biometrik dibatalkan atau gagal; ulangi Submit email.") })
+        })
+        sheet.addAction(UIAlertAction(title: "Tidak", style: .cancel) { [weak self] _ in
+            guard let self else { return }
+            self.emailBiometricChoice = false
+            Utils.setBiometricState(value: nil)
+            self.sendEmailOtp()
+        })
+        present(sheet, animated: true)
+    }
+
+    private func sendEmailOtp() {
+        var request = commonRequest()
+        request[LiteBootstrapKeys.email] = pendingEmail
+        request[LiteBootstrapKeys.businessEntity] = LiteBootstrapAuth.businessEntityKey
+        execute("otp/send", request, deviceProof: false)
+    }
+
+    private func verifyEmailOtp(_ code: String) {
+        var request = commonRequest()
+        request[LiteBootstrapKeys.email] = pendingEmail
+        request[LiteBootstrapKeys.businessEntity] = LiteBootstrapAuth.businessEntityKey
+        request["OTP"] = code
+        execute("otp/verify", request, deviceProof: true)
+    }
+
     /// Lite's own OTP sheet (VerifyEmail): six boxes, closes itself with the code.
     private func showOtpSheet(errCode: String = "") {
         let sheet = VerifyEmail()
         sheet.email = pendingEmail
         sheet.showWrongOTP = errCode
         sheet.isDismiss = { [weak self] code in
-            guard let self else { return }
-            guard self.biometricAvailable else { self.showFailure("Biometrik harus tersedia untuk login OTP."); return }
-            self.biometric("Verify your identity to continue with login.", success: {
-                var request = self.commonRequest()
-                request[LiteBootstrapKeys.email] = self.pendingEmail
-                request[LiteBootstrapKeys.businessEntity] = LiteBootstrapAuth.businessEntityKey
-                request["OTP"] = code
-                self.execute("otp/verify", request, deviceProof: true)
-            }, failure: { _ in self.showFailure("Biometric or passcode authentication required".localized()) })
+            self?.verifyEmailOtp(code)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             (self.navigationController ?? self).present(sheet, animated: true)
@@ -534,15 +630,16 @@ final class LiteBootstrapLoginViewController: LiteBootstrapFormViewController {
     }
 
     /// The backend issues the assertion only at /tfa, so a good first login is stage one: the TFA form follows
-    /// with the same attempt id and connection id, and its answer completes the sign-in. Mode 1 only; the Middle
-    /// (mode 2) first install is not chained (Android, 45eeb487).
+    /// with the same attempt id and connection id, and its answer completes the sign-in. Email OTP uses
+    /// this staged contract in both modes; Middle nickname/password uses SUAI02's direct assertion.
     private func startTfaAfterLogin(_ loginReply: [String: Any], typedPassword: Bool) {
-        guard identity.hsa else { pendingSecret = ""; complete(loginReply, firstLogin: true); return }
+        guard identity.hsa || !typedPassword else { pendingSecret = ""; complete(loginReply, firstLogin: true); return }
         LiteBootstrapLoginStage.stage(binding: bindingID, attempt: attemptID, reply: loginReply)
         // A username login already has the password the TFA stage asks for: send /tfa with it at once, in
         // the same attempt, and go straight into the app - no second form. Only an e-mail (OTP) login, which
         // typed no password, gets the TFA form.
         if typedPassword, !pendingSecret.isEmpty {
+            NXLogger.general.publicInfo("[BootstrapAuth] tahap TFA otomatis (login username, password sudah diketik)")
             var request = commonRequest()
             request[LiteBootstrapKeys.password] = pendingSecret
             request["act"] = "Sign In"
@@ -550,8 +647,11 @@ final class LiteBootstrapLoginViewController: LiteBootstrapFormViewController {
             execute("tfa", request, deviceProof: true)
             return
         }
+        // An e-mail (OTP) login typed no password, so the TFA stage asks for one on its own form.
+        NXLogger.general.publicInfo("[BootstrapAuth] tahap TFA: form ditampilkan (login e-mail/OTP)")
         let tfa = LiteBootstrapTfaViewController(identity: identity, bindingID: bindingID, client: client,
-                                                 attemptID: attemptID, afterLogin: true)
+                                                 attemptID: attemptID, afterLogin: true,
+                                                 biometricChoice: emailBiometricChoice)
         tfa.onFinish = onFinish
         onFinish = nil
         navigationController?.pushViewController(tfa, animated: true)
@@ -572,21 +672,45 @@ final class LiteBootstrapLoginViewController: LiteBootstrapFormViewController {
 final class LiteBootstrapTfaViewController: LiteBootstrapFormViewController {
     /// This TFA completes a first login in the same attempt (the device is not a returning one yet).
     private let afterLogin: Bool
+    private let biometricChoice: Bool?
     private let scrollView = UIScrollView()
     private let stack = UIStackView()
     private let password = UITextField()
     private var invalidPasswordCount = 0
     private var invalidBiometricCount = 0
+    private var biometricStarted = false
+    private var biometricPending = false
+    private var biometricPassed = false
+    private var biometricOnlyRequest = false
+
+    private var asksBiometric: Bool {
+        identity.hsa || (identity.middle && (biometricChoice ?? (Utils.getBiometricState() != nil)))
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        beginMfaAuthentication()
+    }
 
     init(identity: LiteBootstrapIdentity, bindingID: String, client: LiteBootstrapHTTPSClient,
-         attemptID: String? = nil, afterLogin: Bool = false) {
+         attemptID: String? = nil, afterLogin: Bool = false, biometricChoice: Bool? = nil) {
         self.afterLogin = afterLogin
+        self.biometricChoice = biometricChoice
         super.init(identity: identity, bindingID: bindingID, client: client, attemptID: attemptID)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     override func buildForm() {
         title = "Sign In".localized()
+        // This screen exists to authenticate the person again, so it does not inherit a window opened
+        // before it: Lite's shared timer (authentication_duration - 60 s at mode 2) had a sign-in from a
+        // minute ago still counting, and Submit went through with no Face ID at all. Cleared here, as
+        // TFAPasswordVC does when it follows a sign-up. Not on the stage that follows Login in the same
+        // attempt: there the person authenticated seconds ago, on this same form's own prompt.
+        if !afterLogin {
+            SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
+            MasterKeyUtil.shared.invalidateAuthentication()
+        }
         // The first-login stage it completes must still be there; never skip it (process death, expiry).
         if afterLogin, LiteBootstrapLoginStage.reply(binding: bindingID, attempt: attemptID) == nil {
             DispatchQueue.main.async { self.finish(.failure(LiteBootstrapError("Tahap login tidak ditemukan; ulangi dari awal."))) }
@@ -633,6 +757,7 @@ final class LiteBootstrapTfaViewController: LiteBootstrapFormViewController {
         container.heightAnchor.constraint(equalToConstant: 48).isActive = true
         password.placeholder = "Type your password...".localized()
         password.isSecureTextEntry = true
+        password.isEnabled = !asksBiometric
         password.font = .systemFont(ofSize: 15)
         password.borderStyle = .roundedRect
         password.autocapitalizationType = .none
@@ -685,7 +810,65 @@ final class LiteBootstrapTfaViewController: LiteBootstrapFormViewController {
         ])
     }
 
+    private func setPasswordAccess(_ enabled: Bool) {
+        password.isEnabled = enabled
+        navigationItem.rightBarButtonItem?.isEnabled = !biometricPending
+    }
+
+    /// On appearance, authenticate first. HSA then requires a password; Middle can
+    /// finish with the signed device proof alone, or fall back to a password.
+    private func beginMfaAuthentication() {
+        guard !biometricStarted, !biometricPending else { return }
+        biometricStarted = true
+        guard asksBiometric else { setPasswordAccess(true); return }
+        setPasswordAccess(false)
+        guard biometricAvailable else {
+            if identity.hsa {
+                showMfaSecurityFailure("Biometrik wajib tersedia untuk autentikasi HSA.", retry: { [weak self] in
+                    self?.biometricStarted = false
+                    self?.beginMfaAuthentication()
+                })
+            } else {
+                setPasswordAccess(true)
+            }
+            return
+        }
+        biometricPending = true
+        setBusy(true)
+        biometric("Confirm Identity", forcePrompt: true, success: { [weak self] in
+            guard let self else { return }
+            self.biometricPending = false
+            self.biometricPassed = true
+            self.invalidBiometricCount = 0
+            self.setBusy(false)
+            if self.identity.hsa {
+                self.setPasswordAccess(true)
+            } else {
+                self.validate(nil)
+            }
+        }, failure: { [weak self] _ in
+            guard let self else { return }
+            self.biometricPending = false
+            self.setBusy(false)
+            if self.identity.hsa {
+                self.setPasswordAccess(false)
+                self.countBiometricFailure()
+            } else {
+                self.setPasswordAccess(true)
+                self.showMfaSecurityFailure("Biometrik gagal atau dibatalkan.", retry: { [weak self] in
+                    self?.biometricStarted = false
+                    self?.beginMfaAuthentication()
+                }, passwordFallback: { [weak self] in
+                    self?.password.becomeFirstResponder()
+                })
+            }
+        })
+    }
+
     override func submitForm() {
+        guard !busy, !biometricPending else { return }
+        guard biometricStarted else { beginMfaAuthentication(); return }
+        guard !identity.hsa || biometricPassed else { beginMfaAuthentication(); return }
         let secret = password.text ?? ""
         guard !secret.trimmingCharacters(in: .whitespaces).isEmpty else {
             view.makeToast("Password cannot be empty.".localized(), duration: 2.0, position: .center); return
@@ -693,24 +876,15 @@ final class LiteBootstrapTfaViewController: LiteBootstrapFormViewController {
         guard secret.count >= 6 else {
             view.makeToast("Password must be at least 6 characters.".localized(), duration: 2.0, position: .center); return
         }
-        // Password first; Face ID / Touch ID only on Submit (as Lite's TFAPasswordVC), and only when Lite's
-        // shared timer says the last success is older than authentication_duration.
-        if identity.hsa {
-            guard biometricAvailable else { showFailure("Biometrik wajib tersedia untuk autentikasi HSA."); return }
-            biometric("Confirm Identity", success: { [weak self] in
-                self?.invalidBiometricCount = 0
-                self?.validate(secret)
-            }, failure: { [weak self] _ in self?.countBiometricFailure() })
-            return
-        }
         validate(secret)
     }
 
-    private func validate(_ secret: String) {
+    private func validate(_ secret: String?) {
         var request = commonRequest()
         // After a first login the backend already knows the account from the attempt; a returning user names it.
         if !afterLogin { request[LiteBootstrapKeys.account] = identity.fPin }
-        request[LiteBootstrapKeys.password] = secret
+        biometricOnlyRequest = secret == nil
+        if let secret { request[LiteBootstrapKeys.password] = secret }
         request["act"] = "Sign In"
         execute("tfa", request, deviceProof: true)
     }
@@ -718,11 +892,19 @@ final class LiteBootstrapTfaViewController: LiteBootstrapFormViewController {
     private func countBiometricFailure() {
         invalidBiometricCount += 1
         if invalidBiometricCount >= 3 { closeApp("biometrik gagal tiga kali") }
-        else { showFailure("Biometric Failed".localized() + " (\(invalidBiometricCount)/3)") }
+        else {
+            showMfaSecurityFailure("Biometric Failed".localized(), count: invalidBiometricCount, retry: { [weak self] in
+                self?.biometricStarted = false
+                self?.beginMfaAuthentication()
+            })
+        }
     }
 
     override func onBusinessResponse(_ operation: String, _ response: [String: Any]) {
         if response[LiteBootstrapKeys.code] as? String == "00" {
+            if identity.middle, !biometricOnlyRequest {
+                SecureUserDefaults.shared.set(Date(), forKey: "lastAuthenticationTime")
+            }
             guard afterLogin else { complete(response); return }
             // The continuation after the asset opens applies ONE login-shaped reply: the login stage's, with what
             // /tfa decides laid over it (A00/A00real, IDL, the assertion).
@@ -734,11 +916,18 @@ final class LiteBootstrapTfaViewController: LiteBootstrapFormViewController {
             return
         }
         let text = Self.message(response)
-        if text.lowercased().contains("password") {
+        // ERC.NOK_INVALID_PASSWORD = 20; translated response prose is not an error code.
+        let passwordRejected = response[LiteBootstrapKeys.code] as? String == "20" && !biometricOnlyRequest
+        if identity.middle, biometricOnlyRequest {
+            biometricOnlyRequest = false
+            setPasswordAccess(true)
+        }
+        if passwordRejected {
             invalidPasswordCount += 1
             if invalidPasswordCount >= 3 { closeApp("password salah tiga kali"); return }
         }
-        showFailure(text)
+        showMfaSecurityFailure(text, count: passwordRejected ? invalidPasswordCount : nil,
+                               retry: { [weak self] in self?.password.becomeFirstResponder() })
     }
 }
 
@@ -755,4 +944,159 @@ private extension UIView {
         }
         return nil
     }
+}
+
+// MARK: - Middle first install (mode 2) - SignUpSignIn over HTTPS
+
+/// Mode 2, first install on this device: Lite's Sign-Up/Sign-In in one form, before the asset is open.
+///
+/// The counterpart of Android's `BootstrapMiddleActivity` (MABZTAAndroid db4ee2aa): a nickname and a
+/// password go to `POST /idp/v1/authn/sign-in/prepare` - the legacy `SUAI02`, which signs into an existing
+/// account or creates a new one - and that answer carries the assertion itself. There is no separate TFA
+/// stage on this path; mode 1 chains Login -> TFA instead, and a returning user of either mode gets TFA.
+///
+/// Two answers the legacy flow gives that this form has to handle as Lite does:
+///   - `20`, the password does not match a name that exists: the person is asked whether to create a new
+///     account instead, and only their yes re-sends with `FLA=1`.
+///   - a reply without `sg`, or with `LSG` other than "0" (the account is signed in elsewhere): refused,
+///     because nothing here can complete a multiple login safely.
+final class LiteBootstrapMiddleViewController: LiteBootstrapLoginViewController {
+    private var nickname = ""
+    /// In memory only, and cleared as soon as the answer is in.
+    private var secret = ""
+    private var forceNewUser = false
+    private var biometricChosen = false
+
+    override func submitForm() {
+        let name = (user.text ?? "").trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { showFailure("Username/email wajib diisi."); return }
+        if isEmail(name) {
+            secret = ""
+            forceNewUser = false
+            super.submitForm()
+            return
+        }
+        guard name.range(of: "^[a-zA-Z0-9 ]*$", options: .regularExpression) != nil else {
+            showFailure("Username hanya boleh alfanumerik."); return
+        }
+        let typed = password.text ?? ""
+        guard !typed.trimmingCharacters(in: .whitespaces).isEmpty else {
+            view.makeToast("Password cannot be empty.".localized(), duration: 2.0, position: .center); return
+        }
+        guard typed.count >= 6 else {
+            view.makeToast("Password must be at least 6 characters.".localized(), duration: 2.0, position: .center); return
+        }
+        nickname = name
+        secret = typed
+        forceNewUser = false
+        offerBiometrics()
+    }
+
+    /// Asked once, at sign-up, exactly as Android asks it: whether this install should use Face ID / Touch ID
+    /// for the sign-ins that follow. A yes records the enrolled set, which is what the TFA form later checks.
+    private func offerBiometrics() {
+        guard biometricAvailable else {
+            biometricChosen = false
+            Utils.setBiometricState(value: nil)
+            send()
+            return
+        }
+        let sheet = UIAlertController(title: "Biometrik (Opsional)",
+                                      message: "Pakai Face ID / Touch ID untuk Sign-In berikutnya?",
+                                      preferredStyle: .alert)
+        sheet.addAction(UIAlertAction(title: "Ya", style: .default) { [weak self] _ in
+            guard let self else { return }
+            BiometricStateManager().authenticateAndSaveState { ok in
+                DispatchQueue.main.async {
+                    guard ok else {
+                        self.showFailure("Biometrik dibatalkan; pilih Tidak untuk melanjutkan tanpa biometrik.")
+                        return
+                    }
+                    SecureUserDefaults.shared.set(Date(), forKey: "lastAuthenticationTime")
+                    self.biometricChosen = true
+                    self.send()
+                }
+            }
+        })
+        sheet.addAction(UIAlertAction(title: "Tidak", style: .cancel) { [weak self] _ in
+            self?.biometricChosen = false
+            Utils.setBiometricState(value: nil)
+            self?.send()
+        })
+        present(sheet, animated: true)
+    }
+
+    private func send() {
+        var request = commonRequest()
+        request[LiteBootstrapKeys.businessEntity] = LiteBootstrapAuth.businessEntityKey
+        request[LiteBootstrapKeys.name] = nickname
+        request[LiteBootstrapKeys.password] = secret
+        request[LiteBootstrapKeys.forceNewUser] = forceNewUser ? "1" : "0"
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        request[LiteBootstrapKeys.appVersion] = version
+        request[LiteBootstrapKeys.buildVersion] = version
+        execute("sign-in/prepare", request, deviceProof: true)
+    }
+
+    override func onBusinessResponse(_ operation: String, _ response: [String: Any]) {
+        if operation != "sign-in/prepare" {
+            super.onBusinessResponse(operation, response)
+            return
+        }
+        let code = response[LiteBootstrapKeys.code] as? String ?? ""
+        // The name exists and the password does not match it. Lite's own form offers to make a new account
+        // instead, and only that yes re-sends with FLA=1 - never the client on its own.
+        if code == "20", !forceNewUser {
+            let sheet = UIAlertController(title: "Invalid Username and password does not match".localized(),
+                                          message: "Buat User baru dengan password ini?",
+                                          preferredStyle: .alert)
+            sheet.addAction(UIAlertAction(title: "Ya, buat User baru", style: .default) { [weak self] _ in
+                self?.forceNewUser = true
+                self?.send()
+            })
+            sheet.addAction(UIAlertAction(title: "Tidak, coba lagi", style: .cancel) { [weak self] _ in
+                self?.showFailure(Self.message(response))
+            })
+            present(sheet, animated: true)
+            return
+        }
+        guard code == "00" else {
+            switch code {
+            case "11": showFailure("Failed, unknown user".localized())
+            case "4u": showFailure("Failed, blocked user".localized())
+            case "13": showFailure("Failed, This user is not registered on this device".localized())
+            default: showFailure(Self.message(response))
+            }
+            return
+        }
+        let signUp = response[LiteBootstrapKeys.signUpFlag] as? String ?? ""
+        guard signUp == "0" || signUp == "1" else {
+            showFailure("Respons Middle tidak memiliki status sign-in/sign-up.")
+            return
+        }
+        // Multiple login: the account is signed in elsewhere and there is no continuation for that here.
+        // Absent means "not multiple" - SUAI02 only sets LSG when it applies, and the server reads it the
+        // same way (SignInPrepareOperation: optString("LSG", "0")). Requiring the field outright refused
+        // perfectly good sign-ins.
+        guard (response[LiteBootstrapKeys.multipleLogin] as? String ?? "0") == "0" else {
+            showFailure("Akun ini sedang login di perangkat lain.")
+            return
+        }
+        // FLM the server guarantees on a success; Bb only when the legacy reply carried it, so it is
+        // checked for agreement when present rather than demanded.
+        guard !((response[LiteBootstrapKeys.loginMethod] as? String ?? "").trimmingCharacters(in: .whitespaces).isEmpty) else {
+            showFailure("Respons Middle tidak menyebut metode login (FLM).")
+            return
+        }
+        let bound = (response[LiteBootstrapKeys.boundConnectionID] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        guard bound.isEmpty || bound == identity.connectionID else {
+            showFailure("Respons Middle terikat ke koneksi lain.")
+            return
+        }
+        NXLogger.general.publicInfo("[BootstrapAuth] Middle \(signUp == "1" ? "sign-in" : "sign-up") diterima (biometrik \(biometricChosen ? "ya" : "tidak"))")
+        secret = ""
+        complete(response, firstLogin: true)
+    }
+
+    deinit { secret = "" }
 }

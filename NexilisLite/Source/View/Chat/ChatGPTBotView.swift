@@ -1963,16 +1963,7 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
     /// word, which is what they draw everywhere else. The item is left plain on purpose - the bar
     /// draws the glass circle around it, and a button carrying its own would be a second one.
     private func selectionCancelBarButton() -> UIBarButtonItem {
-        if #available(iOS 26.0, *) {
-            let item = UIBarButtonItem(image: UIImage(systemName: "xmark"), style: .plain,
-                                       target: self, action: #selector(cancelAction))
-            item.tintColor = .label
-            return item
-        }
-        let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancelAction))
-        cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white,
-                                             NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
-        return cancelButton
+        return .libCancel(target: self, action: #selector(cancelAction), wordColour: .white)
     }
     
     private func addSubviewMultipleSession() {
@@ -2634,11 +2625,13 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
             containerMessage.isUserInteractionEnabled = true
         }
         
+        // Every bubble with a word of the query is lit up; only one with all of them is counted,
+        // judged by what the bubble shows. See ChatSearchMatch.
         if isSearching && textSearch.count > 1 {
             // The link preview after the "■" is never drawn - see the same fix in the two
             // conversation editors and the rule in ChatMessageText.
             messageText.attributedText = ChatMessageText.withoutLinkPreview(textChat).richText(isSearching: true, textSearch: textSearch)
-            if textChat.lowercased().contains(textSearch) {
+            if ChatSearchMatch.matches(ChatSearchMatch.shownText(of: textChat, audioId: ""), query: textSearch) {
                 countMatchesSearch += 1
             }
         }
@@ -3040,7 +3033,8 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
         var lastIndex = 0
         let messageTextForSearch: [[String: Any?]] = self.dataMessages.reversed()
         for idx in 0..<messageTextForSearch.count {
-            if (messageTextForSearch[idx]["message_text"] as! String).lowercased().contains(textSearch) {
+            if ChatSearchMatch.matches(ChatSearchMatch.shownText(of: messageTextForSearch[idx]["message_text"] as! String, audioId: ""),
+                                       query: textSearch) {
                 lastIndex += 1
                 if lastIndex < indexScroll {
                     continue

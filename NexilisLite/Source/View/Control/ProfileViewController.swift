@@ -156,9 +156,9 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
     private func reload() {
         if let user = self.user {
             self.showName("\(user.firstName) \(user.lastName)")
-            if !user.thumb.isEmpty {
-                self.setProfilePicture(named: user.thumb)
-            }
+            // Called even with no thumb: setImage answers an empty name with the person icon, where
+            // skipping the call left whatever the storyboard had - a grey box - standing in for a face.
+            self.setProfilePicture(named: user.thumb)
         } else {
             getData { user in
                 self.user = user
@@ -338,7 +338,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
 //        self.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .black : .white
         
         if fromRootViewController {
-            navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .cancel, target: self, action: #selector(didTapExit(sender:)))
+            navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(didTapExit(sender:)))
         }
         let myData = User.getData(pin: self.data)
         labelPrivateAccount.text = "Private Account Mode".localized()
@@ -1671,7 +1671,7 @@ extension ProfileViewController {
     /// Editing the status without a screen of its own: the field the storyboard made is still what
     /// saves it, so the words typed here are handed to it and the same save runs.
     @objc func tapEditStatus() {
-        let alert = UIAlertController(title: "Status".localized(), message: nil, preferredStyle: .alert)
+        let alert = LibAlertController(title: "Status".localized(), message: nil, preferredStyle: .alert)
         alert.addTextField { field in
             field.text = self.user?.status
             field.placeholder = "Write a status".localized()

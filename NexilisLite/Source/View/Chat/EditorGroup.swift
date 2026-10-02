@@ -127,9 +127,18 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     public var unique_l_pin = ""
     public var fromNotification = false
     public var referenceMessageId = ""
+    /// The words of the chat-list search this conversation was opened from. They stay lit in its
+    /// bubbles, in yellow, for as long as it is open - the way WhatsApp keeps them lit after a
+    /// search result is tapped. Empty when it was not opened from a search; a search started in
+    /// the conversation itself is lit instead while it runs. See ChatGlobalSearch.
+    public var highlightQuery = ""
     public var referenceChatDate = ""
     var isHistoryCC = false
     var complaintId = ""
+    /// A Call Center session held as a call: what kind, and when it began and ended (ms). Its
+    /// history shows the call as a row of its own - see historyCallRow.
+    var historyCall: (isVideo: Bool, start: Int64, end: Int64, officer: String, requester: String)?
+    static let historyCallPrefix = "CCCALL_"
     var counter = 0
     var markerCounter: String?
     /// How many messages the band above the marker says are waiting. Kept beside
@@ -176,7 +185,13 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// Read from the database rather than by sifting through what is loaded, so searching
     /// reaches the whole conversation without the screen having to hold it. Jumping to a hit
     /// pulls in what it needs, exactly like tapping a quoted message does.
-    private var searchMatchIds: [String] = []
+    private var searchMatchIds: [String] = [] {
+        didSet {
+            searchMatchIdSet = Set(searchMatchIds)
+        }
+    }
+    /// The same, for asking of one row whether it is a result - a result is shown unfolded.
+    private var searchMatchIdSet: Set<String> = []
     /// Whether the loaded window reaches the newest message of the conversation.
     ///
     /// Normally it does: the chat opens at the end and only grows upwards. Jumping to a much
@@ -301,6 +316,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// The two views that trade places when a selection session opens: the sender's picture goes
     /// and the circle takes the same spot. Found by tag because the fade runs over `visibleCells`
     /// after the table has already built them.
+    /// The red "00:42" beside a confidential message, found by tag so the second that has just
+    /// passed can be written where it stands - see showCountdown.
+    static let countdownTag = 77_313
     static let selectionMarkTag = 77_311
     static let selectionAvatarTag = 77_312
     /// Where the circle starts and ends up when it is not shown - small enough to read as growing
@@ -353,6 +371,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     let contactChatNav = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "contactChatNav") as! UINavigationController
     var searchBar: UISearchBar!
     var constraintBottomContainerMultpileSelectSession = NSLayoutConstraint()
+    /// The band's height: its own while the keyboard is up, and the strip under the home
+    /// indicator as well while it is away - see standSearchFooter(onKeyboardFoot:).
+    var constraintHeightContainerMultpileSelectSession = NSLayoutConstraint()
     var titleSearchMatches: UILabel!
     var textSearch = ""
     var countMatchesSearch = 0
@@ -360,6 +381,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     var nextPinShowed = 0
     var buttonUp: UIButton!
     var buttonDown: UIButton!
+    /// Opens the date picker. Only on the bar while the search field is empty.
+    var buttonDate: UIButton!
+    /// What the date button will show next: the wheels, or the keyboard back again. It survives
+    /// the band being dragged away, so what comes back is what the reader last had.
+    var wantsDateWheels = true
     var keyboardHeightForMention: CGFloat?
     var listMentionWithText:[User] = []
     var listMentionInTextField:[User] = []
@@ -1453,9 +1479,35 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
 
     // MARK: - Bubble reuse
 
-    /// Bumped whenever a file arrives, so a bubble drawn against "not downloaded yet" is not
-    /// mistaken for one that is still current.
-    private static var transferTick = 0
+    /// The fields a message can name a file in.
+    static let fileKeys = ["image_id", "video_id", "file_id", "audio_id", "thumb_id", "gif_id"]
+
+    /// How many times each file has moved on since this screen opened, so a bubble drawn
+    /// against "not downloaded yet" is not mistaken for one that is still current.
+    ///
+    /// Fix: this was a single counter, and a static one - one number for every conversation on
+    /// the device, raised whenever any file anywhere finished a step. Raising it made the
+    /// signature of every bubble on the screen stale at once, so the next thing to redraw the
+    /// table - a message arriving, a status changing - built the whole screenful again for the
+    /// sake of one picture that had landed in one of them. A bubble draws its own files and
+    /// nobody else's.
+    private var transferTicks: [String: Int] = [:]
+
+    /// What has arrived for this message's files. Empty for a message that carries none, which
+    /// is most of them.
+    private func transferSignature(of message: [String: Any?]) -> String {
+        guard !transferTicks.isEmpty else {
+            return ""
+        }
+        var ticks: [String] = []
+        for key in EditorGroup.fileKeys {
+            guard let name = message[key] as? String, let tick = transferTicks[name] else {
+                continue
+            }
+            ticks.append("\(name):\(tick)")
+        }
+        return ticks.joined(separator: ",")
+    }
 
     /// Thumbnails being read and decoded right now.
     ///
@@ -1498,15 +1550,21 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// is exactly how a bubble ends up showing yesterday's state, and a field costs nothing to
     /// include - where the answer is "something changed", the bubble is simply built the way it
     /// always was.
-    private func bubbleSignature(for message: [String: Any?], at indexPath: IndexPath) -> String {
+    /// The row number is deliberately not in here. It used to be, and it meant every bubble on
+    /// the screen was thrown away and built again whenever a page of older messages arrived
+    /// above them - the messages had not changed, only their numbering had. Nothing the builder
+    /// draws is read from a neighbouring row, so a bubble that is right at row 40 is the same
+    /// bubble at row 140. What did depend on the row number were the taps, and those now carry
+    /// the message instead - see rowForGesture.
+    private func bubbleSignature(for message: [String: Any?]) -> String {
         let messageId = message["message_id"] as? String ?? ""
-        var parts: [String] = ["\(indexPath.section).\(indexPath.row)"]
+        var parts: [String] = []
         for key in message.keys.sorted() {
             parts.append("\(key)=" + (message[key].map { String(describing: $0) } ?? "nil"))
         }
         // ...and the state of the screen around it, which the drawing reads just as much.
         parts.append("session=\(copySession)\(forwardSession)\(deleteSession)\(summarizeSession)")
-        parts.append("search=\(isSearching)|\(textSearch)")
+        parts.append("search=\(isSearching)|\(textSearch)|\(highlightQuery)")
         parts.append("reference=\(referenceMessageId == messageId)")
         parts.append("marker=\(markerCounter == messageId)")
         parts.append("timer=\(listTimerCredential[messageId] ?? -1)")
@@ -1515,7 +1573,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         // half the colours. Neither is in the message, and both change under the reader.
         parts.append("width=\(Int(view.frame.size.width))")
         parts.append("appearance=\(traitCollection.userInterfaceStyle.rawValue)")
-        parts.append("files=\(EditorGroup.transferTick)")
+        parts.append("files=" + transferSignature(of: message))
         parts.append("edit=\(localEdits[messageId] ?? 0)")
         if let group = groupImages[messageId] {
             // Fix: starring a picture inside a collage changed the member's row and nothing else,
@@ -1524,9 +1582,35 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             // conversation was opened again.
             parts.append("group=" + group.map {
                 "\($0.messageId):\($0.status):\($0.dataMessage["is_stared"] as? String ?? "0")"
+                    + ":" + transferSignature(of: $0.dataMessage)
             }.joined(separator: ","))
         }
         return parts.joined(separator: ";")
+    }
+
+    /// Shows a confidential message's countdown without building its bubble again.
+    ///
+    /// The number changes every second and nothing else about the bubble does. Reloading the row
+    /// for it - which is what this used to do - throws away forty views and two hundred
+    /// constraints and lays them out again, once a second, for a digit. At zero the message
+    /// locks and the whole bubble does change, and that is the one case that still reloads.
+    func showCountdown(_ seconds: Int, forMessageId messageId: String) {
+        guard let path = indexPath(forMessageId: messageId),
+              let cell = tableChatView.cellForRow(at: path),
+              let label = cell.contentView.viewWithTag(EditorGroup.countdownTag) as? UILabel else {
+            return
+        }
+        label.text = seconds >= 10 ? "00:\(seconds)" : "00:0\(seconds)"
+    }
+
+    /// Builds the bubble of a message whose countdown has just run out, where it is on screen.
+    func reloadCountdownRow(forMessageId messageId: String) {
+        guard let path = indexPath(forMessageId: messageId),
+              path.section < tableChatView.numberOfSections,
+              path.row < tableChatView.numberOfRows(inSection: path.section) else {
+            return
+        }
+        tableChatView.reloadRowsKeepingPlace(at: [path])
     }
 
     /// What the cell in hand was last built for, or nil when it holds nothing built.
@@ -2138,7 +2222,12 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         // where it was and the keyboard rose over the newest messages - and the reply bar with
         // it. Without the tracker those systems take the path they always took: the
         // announcement, one layout, and the list put back at the end of it.
-        guard conversationRunsUnderInputArea else {
+        //
+        // A search band is stood on the keyboard frame by frame on every system. Fix: on iOS 15
+        // it only moved when the keyboard was announced, so a keyboard dragged down by the list
+        // left the band standing where the keyboard had been, and a keyboard whose announcement
+        // was missed now and then rose over a band still on the floor.
+        guard conversationRunsUnderInputArea || isSearching else {
             return false
         }
         installKeyboardProbeIfNeeded()
@@ -2173,11 +2262,63 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         let byGuide = keyboardTopByGuide
         // The layout guide first - it is the system's own account and follows a finger; the
         // keyboard's placeholder only where there is no guide to ask.
-        guard let top = byGuide ?? byHost else { return }
+        //
+        // Before iOS 26 the other way round: there the guide does not move while a finger drags
+        // the keyboard away, and the keyboard's host view does.
+        let first: CGFloat?
+        if #available(iOS 26.0, *) {
+            first = byGuide ?? byHost
+        } else {
+            first = byHost ?? byGuide
+        }
+        guard let top = first else { return }
         let foot = max(0, view.bounds.height - top)
+        if isSearching {
+            standSearchFooter(onKeyboardFoot: foot)
+            return
+        }
         if abs(constraintBottomAttachment.constant - foot) > 0.5 {
             constraintBottomAttachment.constant = foot
             view.layoutIfNeeded()
+        }
+    }
+
+    /// Stands the search band on a keyboard whose top is `foot` above the bottom of the screen.
+    ///
+    /// Fix: the band was raised by the announced keyboard height against the safe area, which
+    /// put it a home indicator's worth above the keyboard - a seam of chat showing between the
+    /// two. And it only moved when the keyboard was announced, so a keyboard dragged down by the
+    /// list left the band hanging where it was. It is stood on the keyboard's drawn top, every
+    /// frame, exactly as the reply bar is - and it grows back over the strip under the home
+    /// indicator as the keyboard leaves.
+    func standSearchFooter(onKeyboardFoot foot: CGFloat, layoutNow: Bool = true) {
+        guard isSearching, containerMultpileSelectSession.isDescendant(of: view) else {
+            return
+        }
+        // Fix: the band was raised off the bottom by the keyboard's height, so whatever the
+        // height came out as was all there was between it and the bottom of the screen - and
+        // when the keyboard went, a strip of chat showed underneath. Its foot never leaves the
+        // bottom edge now; the height is what carries the keyboard. Behind a keyboard the extra
+        // is not seen, and with the keyboard gone the band reaches the bottom by construction
+        // rather than by an inset that has to be read at the right moment.
+        let under = foot > 0.5 ? 0 : view.safeAreaInsets.bottom
+        let height = foot + ChatSearchBarKit.barHeight + under
+        if abs(constraintBottomContainerMultpileSelectSession.constant) > 0.5 {
+            constraintBottomContainerMultpileSelectSession.constant = 0
+        }
+        guard abs(constraintHeightContainerMultpileSelectSession.constant - height) > 0.5 else {
+            return
+        }
+        constraintHeightContainerMultpileSelectSession.constant = height
+        // The announcement paths lay out inside their own animation, on the keyboard's curve;
+        // the tracker has no animation to be part of and lays out on the spot.
+        if layoutNow {
+            // Where the table ends on the band (see searchTableFoot), the reader is held where
+            // they were as it grows and shrinks - except under a finger, which is doing the
+            // scrolling itself.
+            let held = searchTableFoot != nil && !tableChatView.isTracking ? listAnchor : nil
+            view.layoutIfNeeded()
+            restore(held)
         }
     }
 
@@ -2198,6 +2339,13 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// nothing else was ever announced.
     @objc func keyboardDidShow(notification: NSNotification) {
         keyboardIsArriving = false
+        // Fix: read off a recording - the band stayed on the floor while the keyboard stood over
+        // it, now and then. Whatever the announcements and the tracker did or did not manage
+        // between them, the keyboard has settled by here and its height is known: the band is
+        // put on it outright.
+        if isSearching, let keyboardHeight = shownKeyboardHeight {
+            standSearchFooter(onKeyboardFoot: keyboardHeight)
+        }
         // The keyboard is up and standing over the sticker panel: now it can go, unseen.
         if stickerPanelWaitingForKeyboard, viewSticker.isDescendant(of: view) {
             stickerPanelWaitingForKeyboard = false
@@ -2308,6 +2456,14 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// The constraint that ended the table above the bar, kept alive once it is idle: the outlet
     /// holding it is weak, and the selection session still writes to it.
     private var retiredTableBottom: NSLayoutConstraint?
+    /// Before iOS 26, while searching: the table's foot, 10pt over the search band's top. The
+    /// storyboard's foot is kept here while it is off, since its outlet is weak.
+    ///
+    /// Fix: the table ended where the input bar would have been, worked out from the bar's hidden
+    /// rows, and that came out lower than the band - the newest bubble sat behind it. Tied to the
+    /// band, the table ends where the band is, wherever the keyboard has put it.
+    private var searchTableFoot: NSLayoutConstraint?
+    private var searchRetiredTableBottom: NSLayoutConstraint?
 
     private func letConversationRunUnderInputArea() {
         conversationRunsUnderInputArea = true
@@ -2501,7 +2657,16 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         // that is already running - see refreshRoomUnderInputArea.
         view.setNeedsLayout()
         guard bottomTableConstantBeforeSelection != nil else { return }
-        constraintBottomTableViewWithTextfield.constant = view.safeAreaInsets.bottom - 60
+        // The same 10pt of air over the bar whichever bar it is - see roomUnderBottomBar.
+        constraintBottomTableViewWithTextfield.constant = roomUnderBottomBar()
+    }
+
+    /// Where the table has to end so that the bar at the foot of the screen has its own room and
+    /// 10pt of air over it. A selection bar is 50 tall; a search bar is taller, because the
+    /// reference draws it taller.
+    private func roomUnderBottomBar() -> CGFloat {
+        let bar = isSearching ? ChatSearchBarKit.barHeight : 50
+        return view.safeAreaInsets.bottom - (bar + 10)
     }
 
     /// Makes the opening placement converge now instead of over the next few layout passes.
@@ -2643,6 +2808,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
 
     public override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // Coming back from anywhere a name or a picture could have been changed - a profile, the
+        // group's own screen - the names held for this conversation are read again.
+        clearProfileCache()
         prepareNavigationBar()
         addPreviewHeaderIfNeeded()
         // A preview is not a conversation being read - see isPreview.
@@ -3502,7 +3670,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                             }
                         }
                         if row != nil && section != nil  {
-                            self.tableChatView.reloadRowsKeepingPlace(at: [IndexPath(row: row!, section: section!)])
+                            if second == 0 {
+                                self.reloadCountdownRow(forMessageId: data.key)
+                            } else {
+                                self.showCountdown(second, forMessageId: data.key)
+                            }
                         }
                     }
                 })
@@ -3540,8 +3712,33 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         return reachable
     }
 
+    /// The names and avatars already read for this conversation.
+    ///
+    /// Every bubble in a group chat asks who sent it, and every ask was a database transaction
+    /// of up to three queries - one per bubble, on the main thread, while the reader scrolls.
+    /// A conversation has a handful of people in it, so nearly all of those asks have the same
+    /// answer. Emptied wherever a name or a member could have changed: see clearProfileCache.
+    private var profileCache: [String: [String: String]] = [:]
+
+    /// Emptied when the people in this conversation might have changed under it - a member
+    /// joining or leaving, the group itself changing, or the reader coming back to the screen
+    /// from somewhere a name could have been edited.
+    private func clearProfileCache() {
+        profileCache.removeAll()
+    }
+
     func getDataProfile(f_pin: String, message_id: String) -> [String: String]{
+        // Answers that depend only on who somebody is are held under their pin. The one that
+        // falls back to the name stored on a message is held under that message, because it is
+        // an answer about the message and not about the person.
+        if let known = profileCache[f_pin] ?? profileCache["\(f_pin)|\(message_id)"] {
+            return known
+        }
         var data: [String: String] = [:]
+        // Whether what was found is a fact about the person - see above. "Unknown" is neither,
+        // and is not kept at all: it is the answer most likely to stop being true.
+        var keyedByPin = true
+        var worthKeeping = true
         Database.shared.database?.inTransaction({ fmdb, rollback in
             if let c = Database().getRecords(fmdb: fmdb, query: "select first_name || ' ' || last_name, image_id from BUDDY where f_pin = '\(f_pin)'"), c.next() {
                 data["name"] = c.string(forColumnIndex: 0)!.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3556,13 +3753,18 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 data["name"] = c.string(forColumnIndex: 0) ?? ""
                 data["image_id"] = ""
                 c.close()
+                keyedByPin = false
             } else if f_pin == "-997" {
                 data["name"] = Utils.getGPTBotName()
                 data["image_id"] = ""
             } else {
                 data["name"] = "Unknown".localized()
+                worthKeeping = false
             }
         })
+        if worthKeeping {
+            profileCache[keyedByPin ? f_pin : "\(f_pin)|\(message_id)"] = data
+        }
         return data
     }
     
@@ -3600,6 +3802,15 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     
     /// What picks this conversation's messages out of MESSAGE. One place, so the row query,
     /// the counts and the "where does this message sit" lookups can never drift apart.
+    /// A bubble's words as the conversation draws them, lit with `highlightQuery` when there is
+    /// one and the conversation is not running a search of its own.
+    private func bubbleRichText(_ text: String, groupId: String = "") -> NSMutableAttributedString {
+        guard !isSearching, !highlightQuery.isEmpty else {
+            return text.richText(group_id: groupId)
+        }
+        return text.richText(isSearching: true, textSearch: highlightQuery, group_id: groupId)
+    }
+
     private func messageWhereClause() -> String {
         if isHistoryCC {
             return "call_center_id='\(complaintId)'"
@@ -3863,6 +4074,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                         }
                         loaded.removeAll { known.contains($0["message_id"] as? String ?? "") }
                     }
+                    self.placeHistoryCall(in: &loaded, offset: offset, olderThan: olderThan)
                     if prepend {
                         self.dataMessages.insert(contentsOf: loaded, at: 0)
                         self.mergeImageRunAcrossSeam(at: loaded.count)
@@ -3883,6 +4095,134 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         })
     }
     
+    /// The call a Call Center session was held as, as a row of its history.
+    ///
+    /// Fix: a session held as an audio or video call left nothing in its history but the chat
+    /// around it - the call itself, the reason the session existed, was not there at all. It is
+    /// not a message and is never written to the database; it is drawn from the session's own
+    /// record, at the moment the call began, as the call record a conversation shows: placed by
+    /// whoever made the call - the officer rings the requester - and saying how long it lasted.
+    /// The chat held during the call is read as before and lands under it, in time order.
+    private func historyCallRow() -> [String: Any?]? {
+        guard isHistoryCC, let call = historyCall else {
+            return nil
+        }
+        let start = call.start > 0 ? call.start : call.end
+        guard start > 0 else {
+            return nil
+        }
+        var row: [String: Any?] = [:]
+        for key in ["audio_id", "video_id", "image_id", "thumb_id", "read_receipts", "chat_id", "file_id",
+                    "reff_id", "lock", "is_stared", "blog_id", "credential"] {
+            row[key] = ""
+        }
+        let seconds = call.start > 0 && call.end > call.start ? (call.end - call.start) / 1000 : 0
+        row["message_id"] = EditorGroup.historyCallPrefix + complaintId
+        row["f_pin"] = call.officer
+        row["l_pin"] = call.requester
+        row["message_scope_id"] = MessageScope.CALL
+        row["status"] = "4"
+        row["attachment_flag"] = "0"
+        // The words a call record carries: its kind, and after " at " how long it took.
+        row["message_text"] = (call.isVideo ? "Video call" : "Audio call") + " at "
+            + String(format: "%02d:%02d", seconds / 60, seconds % 60)
+        row["server_date"] = "\(start)"
+        row["chat_date"] = chatDate(stringDate: "\(start)")
+        row["isSelected"] = false
+        row["progress"] = 0.0
+        return row
+    }
+
+    /// Puts the session's call into the page that covers when it happened: the first page, or
+    /// any page whose messages reach back to it.
+    private func placeHistoryCall(in loaded: inout [[String: Any?]], offset: Int64, olderThan: String?) {
+        guard let call = historyCallRow(), let id = call["message_id"] as? String,
+              !dataMessages.contains(where: { $0["message_id"] as? String == id }),
+              !loaded.contains(where: { $0["message_id"] as? String == id }) else {
+            return
+        }
+        let when = Int64(call["server_date"] as? String ?? "") ?? 0
+        let firstLoaded = loaded.first.flatMap { Int64($0["server_date"] as? String ?? "") }
+        let isOldestPage = offset == 0 && olderThan == nil
+        guard isOldestPage || (firstLoaded.map { when >= $0 } ?? (loaded.isEmpty && dataMessages.isEmpty)) else {
+            return
+        }
+        let at = loaded.firstIndex(where: { (Int64($0["server_date"] as? String ?? "") ?? 0) > when }) ?? loaded.count
+        loaded.insert(call, at: at)
+    }
+
+    /// A call record inside its bubble, drawn as a conversation draws one (see EditorPersonal's
+    /// call bubble): the arrow saying which way the call went, its kind, and how long it lasted.
+    /// In a Call Center history it is a record and nothing more - no tap calls anyone back.
+    private func buildCallRecord(in containerMessage: UIView, replacing messageText: UIView, under senderName: UILabel?,
+                                 row: [String: Any?]) {
+        messageText.removeFromSuperview()
+        let scope = row[TypeDataMessage.message_scope_id] as? String ?? ""
+        let textChat = row["message_text"] as? String ?? ""
+        let containerCall = UIView()
+        containerCall.backgroundColor = .white.withAlphaComponent(0.3)
+        containerMessage.addSubview(containerCall)
+        // Below the sender's name on an incoming bubble, the way the text would have been.
+        let top = senderName?.bottomAnchor ?? containerMessage.topAnchor
+        containerCall.anchor(top: top, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor,
+                             paddingTop: senderName == nil ? BubbleBox.inset : 4, paddingLeft: BubbleBox.inset,
+                             paddingBottom: BubbleBox.inset, paddingRight: BubbleBox.inset, height: 60)
+        containerCall.layer.cornerRadius = BubbleBox.radius
+        containerCall.clipsToBounds = true
+
+        var imageCall = "phone.fill.arrow.up.right"
+        var textCall = "Audio call".localized()
+        let isVideo = CallRecord.isVideo(textChat)
+        let isMissedCall = scope == MessageScope.MISSED_CALL
+        let isImageLeft = CallRecord.status(scope: scope, sender: row["f_pin"] as? String ?? "", currentUser: User.getMyPin() ?? "") != "2"
+        let longCall = textChat.component(1, separatedBy: " at ")
+        var subTextCall = longCall
+
+        let contIconCall = UIView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        containerCall.addSubview(contIconCall)
+        contIconCall.anchor(top: containerCall.topAnchor, left: containerCall.leftAnchor, bottom: containerCall.bottomAnchor, paddingTop: 10, paddingLeft: 10, paddingBottom: 10, width: 40, height: 40)
+        contIconCall.circle()
+        contIconCall.backgroundColor = isImageLeft ? .white : .black.withAlphaComponent(0.6)
+
+        if isVideo && isImageLeft {
+            imageCall = "arrow.down.left.video.fill"
+            textCall = (isMissedCall ? "Missed video call" : "Video call").localized()
+        } else if isVideo {
+            imageCall = "arrow.up.right.video.fill"
+            textCall = "Video call".localized()
+        } else if isImageLeft {
+            imageCall = "phone.fill.arrow.down.left"
+            if isMissedCall {
+                textCall = "Missed audio call".localized()
+            }
+        }
+        // Nothing to call back from a history: a missed call just says it was missed.
+        if isMissedCall {
+            subTextCall = ""
+        } else if longCall.trimmingCharacters(in: .whitespaces) == "0" {
+            subTextCall = "No answer".localized()
+        }
+
+        let iconCall = UIImageView()
+        iconCall.image = UIImage(systemName: imageCall, withConfiguration: UIImage.SymbolConfiguration(pointSize: 18))
+        contIconCall.addSubview(iconCall)
+        iconCall.tintColor = isMissedCall ? .red : (isImageLeft ? .black : .white)
+        iconCall.anchor(centerX: contIconCall.centerXAnchor, centerY: contIconCall.centerYAnchor)
+
+        let titleCall = UILabel()
+        containerCall.addSubview(titleCall)
+        titleCall.anchor(top: containerCall.topAnchor, left: contIconCall.rightAnchor, right: containerCall.rightAnchor, paddingTop: 10, paddingLeft: 10, paddingRight: 10)
+        titleCall.text = textCall
+        titleCall.font = .systemFont(ofSize: 14)
+
+        let subtitleCall = UILabel()
+        containerCall.addSubview(subtitleCall)
+        subtitleCall.anchor(top: titleCall.bottomAnchor, left: contIconCall.rightAnchor, right: containerCall.rightAnchor, paddingLeft: 10, paddingRight: 10)
+        subtitleCall.text = subTextCall
+        subtitleCall.font = .systemFont(ofSize: 13)
+        subtitleCall.textColor = .gray
+    }
+
     /// The day headers, in the order the messages themselves are in.
     private func rebuildDataDates() {
         var seen = Set<String>()
@@ -4109,6 +4449,12 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             anchorMessageId = message(at: anchorIndexPath)?["message_id"] as? String
             anchorDistanceFromTop = tableChatView.rectForRow(at: anchorIndexPath).minY - tableChatView.contentOffset.y
         }
+        // The shape of the table as it stands, so the page can be handed over as insertions
+        // rather than a reload - see applyPrependedPage.
+        let oldDates = dataDates
+        let oldRowCounts = (0..<tableChatView.numberOfSections).map { tableChatView.numberOfRows(inSection: $0) }
+        let oldFirstSectionIds = oldDates.isEmpty ? []
+            : messages(onDate: oldDates[0]).map { $0["message_id"] as? String ?? "" }
 
         // The lower edge of the page, or nothing when fewer than a page remains - in which
         // case the range is open-ended and this is the last page there is.
@@ -4161,17 +4507,25 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             return offsetBeforeLoad + (tableChatView.contentSize.height - heightBeforeLoad)
         }
         // Four ways of handing the page to the table were measured against each other on the
-        // device, and none of them beat this one - the plainest. Inserting the rows rather than
-        // reloading moved the cost from the put-back into the insert and no further (25+70ms
-        // against 69+2); moving the offset inside the update was worse again (120-175ms, up to
-        // twenty-five bubbles built); setting the offset before the first layout meant asking
-        // rectForRow of a table that had just been reloaded, which makes it work out the
-        // geometry of the whole conversation there and then (up to 197ms). What all four have in
-        // common is the part that cannot be argued away: a screenful of bubbles has to be built,
-        // and a bubble costs about five milliseconds. A page lands in something under a tenth of
-        // a second, and it is the drag being ended - see above - rather than any of this that
-        // keeps the reader from losing their place over it.
-        tableChatView.reloadData()
+        // device and none of them won - but that was while the row number was still part of a
+        // bubble's signature, which invalidated every bubble on the screen whichever way the
+        // page was handed over. (Inserting the rows moved the cost from the put-back into the
+        // insert and no further, 25+70ms against 69+2; moving the offset inside the update was
+        // worse again, 120-175ms and up to twenty-five bubbles built; setting the offset before
+        // the first layout made the table work out the geometry of the whole conversation there
+        // and then, up to 197ms.)
+        //
+        // With the row number gone from the signature - see bubbleSignature - the difference is
+        // real. A reload hands every cell on screen back to the reuse pool, and the pool does
+        // not give them back in the order they went in: the cell that comes back for a row was
+        // built for some other row, so its bubble is thrown away and built again. That is the
+        // screenful of bubbles a page used to cost, and it is the reload that costs it, not the
+        // page. Insertions never take the cells off the screen at all. Where the page cannot be
+        // described as insertions, the reload is still what happens.
+        if !applyPrependedPage(oldDates: oldDates, oldRowCounts: oldRowCounts,
+                               oldFirstSectionIds: oldFirstSectionIds) {
+            tableChatView.reloadData()
+        }
         UIView.performWithoutAnimation {
             tableChatView.layoutIfNeeded()
         }
@@ -4193,6 +4547,51 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 tableChatView.layoutIfNeeded()
             }
         }
+    }
+
+    /// Hands a page of older messages to the table as insertions, and says whether it could.
+    ///
+    /// A page of older messages can only ever add whole days at the front, and rows at the front
+    /// of the day that used to be first. Anything else - a day that changed length, the days no
+    /// longer ending the way they did - means the list did not change the way this assumes, and
+    /// the caller reloads instead. Everything is checked against the table's own numbering
+    /// rather than the list's, because that is what a batch update is a delta from.
+    private func applyPrependedPage(oldDates: [String], oldRowCounts: [Int],
+                                    oldFirstSectionIds: [String]) -> Bool {
+        guard !oldDates.isEmpty, tableChatView.numberOfSections == oldDates.count,
+              oldRowCounts.count == oldDates.count else {
+            return false
+        }
+        let addedSections = dataDates.count - oldDates.count
+        guard addedSections >= 0, Array(dataDates.suffix(oldDates.count)) == oldDates else {
+            return false
+        }
+        for index in 1..<oldDates.count where messages(onDate: oldDates[index]).count != oldRowCounts[index] {
+            return false
+        }
+        let firstOldIds = messages(onDate: oldDates[0]).map { $0["message_id"] as? String ?? "" }
+        guard oldRowCounts[0] == oldFirstSectionIds.count,
+              firstOldIds.count >= oldFirstSectionIds.count,
+              Array(firstOldIds.suffix(oldFirstSectionIds.count)) == oldFirstSectionIds else {
+            return false
+        }
+        let addedRows = firstOldIds.count - oldFirstSectionIds.count
+        guard addedSections > 0 || addedRows > 0 else {
+            return true
+        }
+        UIView.performWithoutAnimation {
+            tableChatView.performBatchUpdates({
+                if addedSections > 0 {
+                    tableChatView.insertSections(IndexSet(integersIn: 0..<addedSections), with: .none)
+                }
+                if addedRows > 0 {
+                    tableChatView.insertRows(at: (0..<addedRows).map {
+                        IndexPath(row: $0, section: addedSections)
+                    }, with: .none)
+                }
+            }, completion: nil)
+        }
+        return true
     }
 
     /// Throws away what is loaded and reads a page around a position instead. Used when a
@@ -4284,29 +4683,54 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// deleted for everyone are not results. Apostrophes are escaped - a search for "don't"
     /// used to be pasted straight into the SQL.
     private func searchMatches(for text: String) -> [String] {
-        let needle = text.replacingOccurrences(of: "'", with: "''")
-        guard !needle.isEmpty else {
+        // Every word of the query, each anywhere in the message or in a mention of someone it
+        // names - see ChatSearchMatch. The people are read before the transaction below, in one of
+        // their own.
+        let words = ChatSearchMatch.words(of: text)
+        guard let holdsEveryWord = ChatSearchMatch.sqlCondition(column: "message_text", words: words,
+                                                                people: ChatSearchMatch.peopleNamed(by: words)) else {
             return []
         }
-        var ids: [String] = []
+        // Read in the transaction, judged after it. Fix: the judging draws each message's text
+        // (ChatSearchMatch.shownText), and drawing a mention looks its name up in the database -
+        // a transaction of its own, opened inside this one on the same queue, which is a crash:
+        // "dispatch_sync called on queue already owned by current thread", on the first message
+        // found with a mention in it.
+        let groupId = dataGroup["group_id"] as? String ?? ""
+        var candidates: [(id: String, text: String, audio: String)] = []
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             let query = """
-                        SELECT message_id FROM MESSAGE where \(self.messageWhereClause())
-                        AND message_text LIKE '%\(needle)%'
+                        SELECT message_id, message_text, ifnull(audio_id, ''), ifnull(lock, ''),
+                               ifnull(attachment_flag, ''), ifnull(message_scope_id, '')
+                        FROM MESSAGE where \(self.messageWhereClause())
+                        AND \(holdsEveryWord)
                         AND message_id NOT LIKE '%NTFPIN\\_%' ESCAPE '\\'
                         AND ifnull(lock, '') <> '1'
                         order by server_date desc
                         """
             if let cursor = Database.shared.getRecords(fmdb: fmdb, query: query) {
+                // The database narrows it down; what the bubble shows decides - see
+                // ChatSearchMatch.shownText. Rows the bubble draws no highlight on are no result
+                // either: an expired message, attachment flag 11.
                 while cursor.next() {
-                    if let id = cursor.string(forColumnIndex: 0), !id.isEmpty {
-                        ids.append(id)
+                    guard let id = cursor.string(forColumnIndex: 0), !id.isEmpty else {
+                        continue
                     }
+                    let lock = cursor.string(forColumnIndex: 3) ?? ""
+                    let flag = cursor.string(forColumnIndex: 4) ?? ""
+                    if lock == "2" || flag == "11" {
+                        continue
+                    }
+                    candidates.append((id: id,
+                                       text: cursor.string(forColumnIndex: 1) ?? "",
+                                       audio: cursor.string(forColumnIndex: 2) ?? ""))
                 }
                 cursor.close()
             }
         })
-        return ids
+        return candidates.filter {
+            ChatSearchMatch.matches(ChatSearchMatch.shownText(of: $0.text, audioId: $0.audio, groupId: groupId), query: text)
+        }.map { $0.id }
     }
 
     /// Reads the next page of older messages while nothing is moving.
@@ -4438,6 +4862,20 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         }
         let index = indexes[indexPath.row]
         return index < dataMessages.count ? dataMessages[index] : nil
+    }
+
+    /// The row a tap belongs to, worked out when the tap lands rather than when the bubble was
+    /// built. A row number captured at build time goes stale the moment a page of older messages
+    /// arrives above it; the message it was built for does not. An empty path is handed back
+    /// where neither is known, which is what the handlers already expect.
+    private func rowForGesture(_ sender: ObjectGesture) -> IndexPath {
+        guard !sender.ownerMessageId.isEmpty else {
+            return sender.indexPath
+        }
+        // Where that message is no longer in the table the answer is nothing at all. The row it
+        // was built at names some other message by now, and acting on that is worse than not
+        // acting - which is why the row it carries is not a fallback here.
+        return indexPath(forMessageId: sender.ownerMessageId) ?? IndexPath()
     }
 
     /// Where a message sits in the table right now.
@@ -4784,7 +5222,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 if !isHistoryCC {
                     titleNavigation.set(image: UIImage(named: "ic_official_flag", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(dataGroup["f_name"]!!) (\(dataTopic["title"]!!))", size: ChatHeaderMetrics.flagSize, y: ChatHeaderMetrics.flagBaseline)
                 } else {
-                    titleNavigation.text = (dataGroup["f_name"] as? String)! + " " + "Contact Center".localized()
+                    titleNavigation.text = (dataGroup["f_name"] as? String)! + " " + "Call Center".localized()
                 }
             } else {
                 titleNavigation.text = (dataGroup["f_name"] as? String ?? "") + " (\(dataTopic["title"] as? String ?? ""))"
@@ -4810,6 +5248,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             }
 
             ChatHeaderMetrics.layoutTitleView(viewAppBar, title: titleNavigation, subtitle: membersNavigation)
+            viewAppBar.isUserInteractionEnabled = true
             navigationItem.titleView = viewAppBar
             titleText = titleNavigation.text
             previewHeaderLabel?.text = titleText
@@ -4817,6 +5256,12 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             searchBar = ChatSearchBar()
             searchBar.autocapitalizationType = .none
             searchBar.delegate = self
+            // Fix: the field sits in a navigation bar that is forced dark, and a keyboard takes
+            // its appearance from the field it is typing into - so a chat being read in daylight
+            // was answered with a black keyboard, and the wheels with it. Both follow the
+            // conversation's own appearance, which is the one the reader chose.
+            searchBar.searchTextField.keyboardAppearance =
+                view.traitCollection.userInterfaceStyle == .dark ? .dark : .light
             searchBar.searchTextField.tintColor = .mainColor
             searchBar.searchTextField.textColor = .black
 //            searchBar.updateHeight(height: 36, radius: 18)
@@ -5304,17 +5749,13 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                         }
                     }
                     
-                    // FIX: nil check SEBELUM force unwrap
-                    if let section = self.dataDates.indices.last,
-                       let row = self.dataMessages.filter({
-                           $0["chat_date"] as? String ?? "" == self.dataDates[section]
-                       }).firstIndex(where: {
-                           $0["message_id"] as? String == messageId
-                       }) {
-                        self.tableChatView.reloadRows(
-                            at: [IndexPath(row: row, section: section)],
-                            with: .none
-                        )
+                    if minute == 0 {
+                        self.reloadCountdownRow(forMessageId: messageId)
+                    } else {
+                        // Fix: the row was only ever redrawn when the countdown reached zero, so
+                        // the number beside the message stood still until something else redrew
+                        // it. The second that has just passed is written where the label stands.
+                        self.showCountdown(minute, forMessageId: messageId)
                     }
                 }
                 self.timerCredential[messageId] = timer
@@ -5611,6 +6052,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     @objc func onMemberTopic(notification: NSNotification) {
         let data:[AnyHashable : Any] = notification.userInfo!
         DispatchQueue.main.async { [self] in
+            clearProfileCache()
             if data["member"] == nil || data["code"]  as? String ?? "" == CoreMessage_TMessageCode.EXIT_GROUP && data["member"]  as? String ?? "" == User.getMyPin()! && data["groupId"]  as? String ?? "" == self.dataGroup["group_id"]  as? String ?? "" && !containerActionGroup.isDescendant(of: self.view) {
                 dismissKeyboard()
                 let labelKicked = UILabel()
@@ -5635,23 +6077,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 cancelAction()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: { [self] in
                     navigationItem.rightBarButtonItem = nil
-                    view.addSubview(containerActionGroup)
-                    containerActionGroup.translatesAutoresizingMaskIntoConstraints = false
-                    NSLayoutConstraint.activate([
-                        containerActionGroup.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
-                        containerActionGroup.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
-                        containerActionGroup.bottomAnchor.constraint(equalTo: self.view.bottomAnchor),
-                        containerActionGroup.heightAnchor.constraint(equalToConstant: 120)
-                    ])
-                    containerActionGroup.backgroundColor = .secondaryColor.withAlphaComponent(0.8)
-                    containerActionGroup.addSubview(labelKicked)
-                    labelKicked.translatesAutoresizingMaskIntoConstraints = false
-                    NSLayoutConstraint.activate([
-                        labelKicked.centerYAnchor.constraint(equalTo: containerActionGroup.centerYAnchor),
-                        labelKicked.centerXAnchor.constraint(equalTo: containerActionGroup.centerXAnchor),
-                    ])
-                    labelKicked.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-                    labelKicked.font = UIFont.systemFont(ofSize: 12 + offset()).bold
+                    coverInputArea(with: containerActionGroup, saying: labelKicked.text ?? "")
                     if contactChatNav.viewIfLoaded?.window != nil {
                         contactChatNav.dismiss(animated: true)
                     }
@@ -5671,6 +6097,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         let data:[AnyHashable : Any] = notification.userInfo!
         if data["code"]  as? String ?? "" == "A010" && data["groupId"]  as? String ?? "" == self.dataGroup["group_id"]  as? String ?? "" {
             DispatchQueue.main.async {
+                self.clearProfileCache()
                 Database.shared.database?.inTransaction({ fmdb, rollback in
                     if let c = Database().getRecords(fmdb: fmdb, query: "select f_name, image_id from GROUPZ where group_id = '\(self.dataGroup["group_id"]!!)'"), c.next() {
                         self.dataGroup["f_name"] = c.string(forColumnIndex: 0)!.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -6132,6 +6559,16 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         if isHistoryCC {
             return
         }
+        // Fix: tapping a mention of yourself sometimes opened your profile twice. One touch on a
+        // name can be read by more than one route - the tap, the hold timer, the bubble menu's own
+        // hold - and the flags that keep them apart depend on which fires first. A card for anyone
+        // else could not be shown twice (a second presentation is refused), but a profile is
+        // pushed, and pushing twice works. The navigation stack answers it whatever the order:
+        // the moment a push begins, the profile is on top, and a second one for the same person is
+        // not pushed over it.
+        if let shown = navigationController?.topViewController as? ProfileViewController, shown.data == pin {
+            return
+        }
         let idMe = User.getMyPin() as String?
         if pin == idMe {
             let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
@@ -6199,6 +6636,12 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     
     @objc func dismissKeyboard() {
         if isSearching {
+            // The wheels are not a keyboard that a tap anywhere should close. They are a panel
+            // the reader opened on purpose and will use more than once; it goes down the way the
+            // reference takes it down - dragged with the list - or by the button that opened it.
+            guard !(searchBar?.searchTextField.inputView is ChatDateJumpPanel) else {
+                return
+            }
             searchBar.resignFirstResponder()
         } else {
             textFieldSend.resignFirstResponder() // dismiss keyoard
@@ -6310,7 +6753,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 if self.viewSticker.isDescendant(of: self.view) {
                     self.stickerPanelWaitingForKeyboard = true
                 }
-                Self.rememberKeyboardHeight(keyboardHeight)
+                // The wheels are not a keyboard: remembered as one, they would size the
+                // next wheels and sticker panel after themselves.
+                if !(searchBar?.searchTextField.inputView is ChatDateJumpPanel) {
+                    Self.rememberKeyboardHeight(keyboardHeight)
+                }
 //                self.constraintViewTextField.constant = keyboardHeight - 60
                 self.shownKeyboardHeight = keyboardHeight
                 self.keyboardIsArriving = true
@@ -6327,8 +6774,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 // taking already; holding the distance from the end of the list covers that case
                 // too, and a keyboard that merely changes height along with it.
                 let wasShowing = self.listAnchor
-                if isSearching {
-                    self.constraintBottomContainerMultpileSelectSession.constant = -keyboardHeight
+                if isSearching, !tracked {
+                    self.standSearchFooter(onKeyboardFoot: keyboardHeight, layoutNow: false)
                 }
                 let travel = keyboardTravel(info)
                 UIView.animate(withDuration: travel.duration, delay: 0, options: travel.options, animations: {
@@ -6390,7 +6837,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             stopTrackingKeyboard()
             let stickerUp = self.viewSticker.isDescendant(of: self.view)
             self.constraintBottomAttachment.constant = stickerUp ? self.stickerPanelShownHeight : 0
-            self.constraintBottomContainerMultpileSelectSession.constant = 0
+            self.standSearchFooter(onKeyboardFoot: 0, layoutNow: false)
+            self.forgetDateWheels()
             keyboardHeightForMention = nil
             let travel = keyboardTravel(info)
             UIView.animate(withDuration: travel.duration, delay: 0, options: travel.options, animations: {
@@ -6910,10 +7358,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                         })
                     }
                 }
-                let section = self.dataDates.firstIndex(of: self.dataDates[self.dataDates.count - 1])
-                let row = self.messages(onDate: self.dataDates[self.dataDates.count - 1]).firstIndex(where: { $0["message_id"] as? String == messageId})
-                if row != nil && section != nil{
-                    self.tableChatView.reloadRowsKeepingPlace(at: [IndexPath(row: row!, section: section!)])
+                if minute == 0 {
+                    self.reloadCountdownRow(forMessageId: messageId)
+                } else {
+                    self.showCountdown(minute, forMessageId: messageId)
                 }
             })
             self.timerCredential[messageId] = timer
@@ -6983,25 +7431,47 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     }
     
     private func disableEditor() {
-        view.addSubview(containerAction)
-        containerAction.translatesAutoresizingMaskIntoConstraints = false
+        coverInputArea(with: containerAction, saying: "Call Center Session has ended".localized())
+    }
+
+    /// Lays a cover over the whole input area - the field and the row of buttons under it - with
+    /// one line saying why nothing can be written here any more.
+    ///
+    /// Fix: both covers in this screen were a fixed 120pt measured up from the bottom of the
+    /// screen. The input area is taller than that once the safe area and the row of attachment
+    /// buttons are counted, so the cover stopped short and the field it was meant to close was
+    /// still there above it, ready to be typed into. It starts at the top of the field now, the
+    /// way EditorPersonal's coverInputArea does, however tall the area below it has become.
+    private func coverInputArea(with cover: UIView, saying words: String) {
+        dismissKeyboard()
+        cover.subviews.forEach({ $0.removeFromSuperview() })
+        cover.removeFromSuperview()
+        view.addSubview(cover)
+        cover.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            containerAction.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
-            containerAction.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
-            containerAction.bottomAnchor.constraint(equalTo: self.view.bottomAnchor),
-            containerAction.heightAnchor.constraint(equalToConstant: 120)
+            cover.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
+            cover.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
+            cover.bottomAnchor.constraint(equalTo: self.view.bottomAnchor),
+            cover.topAnchor.constraint(equalTo: viewTextfield.topAnchor)
         ])
-        containerAction.backgroundColor = .secondaryColor.withAlphaComponent(0.8)
-        let labelDisable = UILabel()
-        containerAction.addSubview(labelDisable)
-        labelDisable.translatesAutoresizingMaskIntoConstraints = false
+        cover.backgroundColor = .secondaryColor.withAlphaComponent(0.8)
+        // Touches stop here rather than reaching the field underneath.
+        cover.isUserInteractionEnabled = true
+        let label = UILabel()
+        cover.addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            labelDisable.centerYAnchor.constraint(equalTo: containerAction.centerYAnchor),
-            labelDisable.centerXAnchor.constraint(equalTo: containerAction.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: cover.centerYAnchor),
+            label.centerXAnchor.constraint(equalTo: cover.centerXAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: cover.leadingAnchor, constant: 16),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: cover.trailingAnchor, constant: -16)
         ])
-        labelDisable.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-        labelDisable.font = UIFont.systemFont(ofSize: 12 + offset()).bold
-        labelDisable.text = "Call Center Session has ended".localized()
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        label.font = UIFont.systemFont(ofSize: 12 + offset()).bold
+        label.text = words
+        view.bringSubviewToFront(cover)
     }
     
     /// Keeps what is on screen exactly where it is when the input area grows or shrinks.
@@ -9495,7 +9965,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 var checkDataPinned = self.pinnedMessagesForBanner()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: {
                     if checkDataPinned.count >= PinnedMessages.maximum {
-                        let alert = UIAlertController(title: "Replace oldest pin?".localized(),
+                        let alert = LibAlertController(title: "Replace oldest pin?".localized(),
                                                       message: "Your pin will replace the oldest one.".localized(),
                                                       preferredStyle: .alert)
 
@@ -10534,6 +11004,12 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             if self.viewButton.isHidden {
                 self.viewButton.isHidden = false
             }
+            if let foot = self.searchTableFoot, let storyboardFoot = self.searchRetiredTableBottom {
+                foot.isActive = false
+                storyboardFoot.isActive = true
+                self.searchTableFoot = nil
+                self.searchRetiredTableBottom = nil
+            }
             if let restored = self.bottomTableConstantBeforeSelection {
                 let readingPlace = self.distanceFromNewestMessage()
                 self.constraintBottomTableViewWithTextfield.constant = restored
@@ -10585,16 +11061,40 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         endOpeningPlacement()
         let readingPlace = distanceFromNewestMessage()
         bottomTableConstantBeforeSelection = constraintBottomTableViewWithTextfield.constant
-        constraintBottomTableViewWithTextfield.constant = view.safeAreaInsets.bottom - 60
+        // The same 10pt of air over the bar whichever bar it is - see roomUnderBottomBar.
+        constraintBottomTableViewWithTextfield.constant = roomUnderBottomBar()
         view.addSubview(containerMultpileSelectSession)
         containerMultpileSelectSession.translatesAutoresizingMaskIntoConstraints = false
-        constraintBottomContainerMultpileSelectSession = containerMultpileSelectSession.bottomAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.bottomAnchor, constant: 0)
+        // A search bar stands on the bottom edge of the screen and runs under the home
+        // indicator, the way the reply bar it replaces does - so it meets the keyboard with no
+        // seam and covers the strip below when the keyboard is away. A selection bar is one of
+        // the floating capsules and keeps the safe area it always had.
+        constraintBottomContainerMultpileSelectSession = isSearching
+            ? containerMultpileSelectSession.bottomAnchor.constraint(equalTo: self.view.bottomAnchor, constant: 0)
+            : containerMultpileSelectSession.bottomAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.bottomAnchor, constant: 0)
+        // Fix: the height is the bar's own constraint, and taking the bar off the screen does not
+        // take it away - only the ties to the screen go with it. The last session's height stayed
+        // on, the new one was added beside it, and with the two at odds Auto Layout dropped one:
+        // after a forward or a copy the search band was held at that bar's 50pt and the keyboard
+        // rose over it. The last one goes before the next is made.
+        constraintHeightContainerMultpileSelectSession.isActive = false
+        constraintHeightContainerMultpileSelectSession = containerMultpileSelectSession.heightAnchor.constraint(
+            equalToConstant: isSearching ? ChatSearchBarKit.barHeight + view.safeAreaInsets.bottom : 50)
+        constraintHeightContainerMultpileSelectSession.priority = .required
         NSLayoutConstraint.activate([
             containerMultpileSelectSession.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
             containerMultpileSelectSession.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
             constraintBottomContainerMultpileSelectSession,
-            containerMultpileSelectSession.heightAnchor.constraint(equalToConstant: 50)
+            constraintHeightContainerMultpileSelectSession
         ])
+        if isSearching, !conversationRunsUnderInputArea, searchTableFoot == nil,
+           let storyboardFoot = constraintBottomTableViewWithTextfield {
+            searchRetiredTableBottom = storyboardFoot
+            storyboardFoot.isActive = false
+            let foot = tableChatView.bottomAnchor.constraint(equalTo: containerMultpileSelectSession.topAnchor, constant: -10)
+            foot.isActive = true
+            searchTableFoot = foot
+        }
         // Nothing is painted behind the capsule on iOS 26 - it floats over the chat, the way
         // the bar it replaces does on that release.
         if #available(iOS 26.0, *) {
@@ -10791,23 +11291,16 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
     /// where that button belongs is the one thing on this bar that still reads as the release
     /// before. Older releases keep the word, which is what they draw everywhere else.
     private func selectionCancelBarButton() -> UIBarButtonItem {
-        if #available(iOS 26.0, *) {
-            // Fix: this used to be a button carrying a glass background of its own, which the bar
-            // then drew its own glass circle around - the pill outlined inside the circle. The
-            // bar dresses whatever item it is given on this release, so the item is left plain
-            // and the circle is the bar's.
-            let item = UIBarButtonItem(image: UIImage(systemName: "xmark"), style: .plain,
-                                       target: self, action: #selector(cancelAction))
-            item.tintColor = .label
-            return item
-        }
-        let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancelAction))
-        cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white,
-                                             NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
-        return cancelButton
+        return .libCancel(target: self, action: #selector(cancelAction), wordColour: .white)
     }
 
     private func addSubviewMultipleSession() {
+        // Fix: this bar is one view, kept for the life of the screen and taken off the screen
+        // rather than thrown away when a session ends - so everything built into it stayed built
+        // into it. Opening a search a second time laid a new bar over the old one, and the old
+        // one still carried the last search's count: "3 of 27 matches" sitting there under a
+        // fresh, empty bar. Whatever was in it belongs to the session that is over.
+        containerMultpileSelectSession.subviews.forEach { $0.removeFromSuperview() }
         let container = UIView()
         containerMultpileSelectSession.addSubview(container)
         container.translatesAutoresizingMaskIntoConstraints = false
@@ -10815,16 +11308,33 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         // that release does with every other bar; before it, the bar stays the full-width block
         // with the shadow, which is what those releases do.
         var sideInset: CGFloat = 0
-        if #available(iOS 26.0, *) {
+        // Fix: a search bar is not one of the floating capsules. It is the strip the keyboard
+        // pushes up, and WhatsApp draws it as a band across the whole width on the keyboard's
+        // own ground, with the pill and the date button standing on it. Held clear of the edges
+        // as a capsule, it read as something laid over the chat instead of part of what is under
+        // the finger.
+        if #available(iOS 26.0, *), !isSearching {
             sideInset = 16
         }
         NSLayoutConstraint.activate([
             container.leadingAnchor.constraint(equalTo: containerMultpileSelectSession.leadingAnchor, constant: sideInset),
             container.trailingAnchor.constraint(equalTo:containerMultpileSelectSession.trailingAnchor, constant: -sideInset),
-            container.bottomAnchor.constraint(equalTo: containerMultpileSelectSession.bottomAnchor),
-            container.heightAnchor.constraint(equalToConstant: 50)
+            // Searching: the pill and the circle keep to the top of the band, and whatever the
+            // band gains under the home indicator hangs below them. Otherwise, the capsule is
+            // the bar and sits on its foot as it always did.
+            isSearching
+                ? container.topAnchor.constraint(equalTo: containerMultpileSelectSession.topAnchor)
+                : container.bottomAnchor.constraint(equalTo: containerMultpileSelectSession.bottomAnchor),
+            container.heightAnchor.constraint(equalToConstant: isSearching ? ChatSearchBarKit.barHeight : 50)
         ])
-        if #available(iOS 26.0, *) {
+        if isSearching {
+            // Fix: the ground went on this container, which is only the 76pt the pill and the
+            // circle stand in - so everything the band gained below it, the strip under the home
+            // indicator and the room behind the keyboard, was left transparent and the chat
+            // showed through at the very bottom. The ground belongs to the band itself.
+            ChatSearchBarKit.band(containerMultpileSelectSession)
+            container.backgroundColor = .clear
+        } else if #available(iOS 26.0, *) {
             container.backgroundColor = .clear
             container.cornerConfiguration = .capsule()
             // The glass goes behind everything else the bar carries, so the count and the buttons
@@ -10911,40 +11421,76 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 }
             }
         } else {
+            // The two arrows share one capsule at the left of the bar, and the button that
+            // opens the date picker is a circle at the right - both standing on the ground the
+            // sticker panel stands on. See ChatSearchBarKit.
+            let stepper = UIView()
+            container.addSubview(stepper)
+            stepper.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                stepper.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: ChatSearchBarKit.sideInset),
+                stepper.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                stepper.widthAnchor.constraint(equalToConstant: ChatSearchBarKit.stepperSize.width),
+                stepper.heightAnchor.constraint(equalToConstant: ChatSearchBarKit.stepperSize.height)
+            ])
+            ChatSearchBarKit.glass(behind: stepper, cornerRadius: ChatSearchBarKit.stepperSize.height / 2)
+
             buttonUp = UIButton()
-            container.addSubview(buttonUp)
+            stepper.addSubview(buttonUp)
             buttonUp.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
-                buttonUp.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
-                buttonUp.centerYAnchor.constraint(equalTo:container.centerYAnchor),
-                buttonUp.widthAnchor.constraint(equalToConstant: 30),
-                buttonUp.heightAnchor.constraint(equalToConstant: 30),
+                buttonUp.leadingAnchor.constraint(equalTo: stepper.leadingAnchor),
+                buttonUp.topAnchor.constraint(equalTo: stepper.topAnchor),
+                buttonUp.bottomAnchor.constraint(equalTo: stepper.bottomAnchor),
+                buttonUp.widthAnchor.constraint(equalTo: stepper.widthAnchor, multiplier: 0.5)
             ])
             buttonUp.addTarget(self, action: #selector(upSearchText), for: .touchUpInside)
             
             buttonDown = UIButton()
-            container.addSubview(buttonDown)
+            stepper.addSubview(buttonDown)
             buttonDown.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
-                buttonDown.leadingAnchor.constraint(equalTo: buttonUp.trailingAnchor, constant: 15),
-                buttonDown.centerYAnchor.constraint(equalTo:container.centerYAnchor),
-                buttonDown.widthAnchor.constraint(equalToConstant: 30),
-                buttonDown.heightAnchor.constraint(equalToConstant: 30),
+                buttonDown.trailingAnchor.constraint(equalTo: stepper.trailingAnchor),
+                buttonDown.topAnchor.constraint(equalTo: stepper.topAnchor),
+                buttonDown.bottomAnchor.constraint(equalTo: stepper.bottomAnchor),
+                buttonDown.widthAnchor.constraint(equalTo: stepper.widthAnchor, multiplier: 0.5)
             ])
             buttonDown.addTarget(self, action: #selector(downSearchText), for: .touchUpInside)
             
-            buttonUp.setImage(UIImage(systemName: "chevron.up"), for: .normal)
+            buttonUp.setImage(UIImage(systemName: "chevron.up", withConfiguration: ChatSearchBarKit.chevronLook), for: .normal)
             buttonUp.tintColor = .gray
             
-            buttonDown.setImage(UIImage(systemName: "chevron.down"), for: .normal)
+            buttonDown.setImage(UIImage(systemName: "chevron.down", withConfiguration: ChatSearchBarKit.chevronLook), for: .normal)
             buttonDown.tintColor = .gray
+
+            // The date button stands where the count would be if there were one, and it leaves
+            // as soon as there is something in the field to count - see searchBar(_:textDidChange:).
+            buttonDate = UIButton()
+            container.addSubview(buttonDate)
+            buttonDate.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                buttonDate.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -ChatSearchBarKit.sideInset),
+                buttonDate.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                buttonDate.widthAnchor.constraint(equalToConstant: ChatSearchBarKit.roundSize),
+                buttonDate.heightAnchor.constraint(equalToConstant: ChatSearchBarKit.roundSize)
+            ])
+            ChatSearchBarKit.glass(behind: buttonDate, cornerRadius: ChatSearchBarKit.roundSize / 2)
+            wantsDateWheels = true
+            buttonDate.setImage(ChatSearchBarKit.dateSymbol, for: .normal)
+            buttonDate.tintColor = .mainColor
+            buttonDate.addTarget(self, action: #selector(openDateJump), for: .touchUpInside)
+            buttonDate.isHidden = !(searchBar?.text ?? "").isEmpty
             
             titleSearchMatches = UILabel()
             container.addSubview(titleSearchMatches)
             titleSearchMatches.translatesAutoresizingMaskIntoConstraints = false
+            titleSearchMatches.adjustsFontSizeToFitWidth = true
+            titleSearchMatches.minimumScaleFactor = 0.8
             NSLayoutConstraint.activate([
                 titleSearchMatches.centerXAnchor.constraint(equalTo: container.centerXAnchor),
                 titleSearchMatches.centerYAnchor.constraint(equalTo:container.centerYAnchor),
+                titleSearchMatches.leadingAnchor.constraint(greaterThanOrEqualTo: stepper.trailingAnchor, constant: 10),
+                titleSearchMatches.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -10)
             ])
             titleSearchMatches.textColor = .mainColor
             titleSearchMatches.font = UIFont.systemFont(ofSize: 15.0).bold
@@ -10955,6 +11501,123 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         }
     }
     
+    /// Trades the keyboard for the date wheels, or the wheels back for the keyboard.
+    ///
+    /// The wheels are the search field's input view, so the system swaps one for the other with
+    /// the animation it gives any keyboard change, and the footer goes on standing on whatever
+    /// is there - it follows the keyboard guide and never had to know which of the two it was.
+    @objc func openDateJump() {
+        guard let field = searchBar?.searchTextField else {
+            return
+        }
+        // The button does what it says, and it says the same thing whether the band is standing
+        // open or has been dragged away - see wantsDateWheels.
+        if wantsDateWheels {
+            // Before iOS 26 the wheels are the keyboard's height, so they take its place
+            // exactly and the band stays standing where it was.
+            var height: CGFloat?
+            if #unavailable(iOS 26.0) {
+                height = stickerPanelHeight
+            }
+            let panel = ChatDateJumpPanel(earliest: firstMessageDay(), height: height) { [weak self] day in
+                // The wheels stay up, on the day they were left on. Jumping to a date is
+                // something a reader does more than once - a day either side of the one they
+                // meant, a month along - and putting the wheels away after each jump would make
+                // them set the whole date again every time.
+                self?.jump(toDay: day)
+            }
+            panel.overrideUserInterfaceStyle = view.traitCollection.userInterfaceStyle
+            field.inputView = panel
+        } else {
+            field.inputView = nil
+        }
+        wantsDateWheels.toggle()
+        if !field.isFirstResponder {
+            field.becomeFirstResponder()
+        }
+        field.reloadInputViews()
+        refreshDateButton()
+    }
+
+    /// Lets go of the wheels when the band is dragged away, without changing what the button
+    /// offers.
+    ///
+    /// Fix: this used to put the button back to the calendar whenever the band went down, so a
+    /// reader who had the keyboard up, dragged it away and reached for the button again was
+    /// given the wheels - something they had not asked for and had just put away. What the
+    /// button offers is decided by the reader, not by the band leaving; only the input view is
+    /// let go, so that bringing the keyboard back is bringing back a keyboard.
+    func forgetDateWheels() {
+        guard let field = searchBar?.searchTextField, field.inputView is ChatDateJumpPanel else {
+            return
+        }
+        field.inputView = nil
+    }
+
+    /// The button says what the next tap will show - and goes on saying it while nothing is
+    /// standing there, so a band dragged away comes back as whatever the reader last had.
+    private func refreshDateButton() {
+        buttonDate?.setImage(wantsDateWheels ? ChatSearchBarKit.dateSymbol : ChatSearchBarKit.keyboardSymbol,
+                             for: .normal)
+    }
+
+    /// Takes the conversation to the first message of `day`.
+    ///
+    /// A day with nothing in it is not an empty answer: the reader asked to be put at a point in
+    /// time, so the nearest message after it is where they land - and where there is nothing
+    /// after it either, the last one before it.
+    private func jump(toDay day: Date) {
+        guard let messageId = messageId(nearestTo: day), !messageId.isEmpty else {
+            view.makeToast("Not found".localized(), duration: 2)
+            return
+        }
+        highlightMessage(messageId)
+    }
+
+    /// The day this conversation's first message was sent, or nil for one with nothing in it.
+    private func firstMessageDay() -> Date? {
+        var earliest: Int64 = 0
+        Database.shared.database?.inTransaction({ fmdb, _ in
+            if let cursor = Database.shared.getRecords(
+                fmdb: fmdb,
+                query: "SELECT MIN(CAST(server_date AS INTEGER)) FROM MESSAGE WHERE \(self.messageWhereClause())"),
+               cursor.next() {
+                earliest = cursor.longLongInt(forColumnIndex: 0)
+                cursor.close()
+            }
+        })
+        guard earliest > 0 else {
+            return nil
+        }
+        return Calendar.current.startOfDay(for: Date(timeIntervalSince1970: Double(earliest) / 1000))
+    }
+
+    private func messageId(nearestTo day: Date) -> String? {
+        let start = Int64(Calendar.current.startOfDay(for: day).timeIntervalSince1970 * 1000)
+        let end = start + 86_400_000
+        let where_ = messageWhereClause()
+        // In order: that day, then the first day after it, then the last day before it.
+        let tries = [
+            "\(where_) AND CAST(server_date AS INTEGER) >= \(start) AND CAST(server_date AS INTEGER) < \(end) ORDER BY CAST(server_date AS INTEGER) ASC",
+            "\(where_) AND CAST(server_date AS INTEGER) >= \(end) ORDER BY CAST(server_date AS INTEGER) ASC",
+            "\(where_) AND CAST(server_date AS INTEGER) < \(start) ORDER BY CAST(server_date AS INTEGER) DESC"
+        ]
+        var found: String?
+        Database.shared.database?.inTransaction({ fmdb, _ in
+            for clause in tries {
+                guard found == nil else {
+                    break
+                }
+                if let cursor = Database.shared.getRecords(
+                    fmdb: fmdb, query: "SELECT message_id FROM MESSAGE WHERE \(clause) LIMIT 1"), cursor.next() {
+                    found = cursor.string(forColumnIndex: 0)
+                    cursor.close()
+                }
+            }
+        })
+        return found
+    }
+
     @objc func upSearchText() {
         scrollToFirstSearchMessage(indexScroll: lastScrollIdxSearch + 1)
     }
@@ -12697,7 +13360,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         // file landing: each of those redraws rows whose bubbles are already correct and already
         // in front of the reader. When the cell in hand was built for this message in this state,
         // it is already the answer.
-        let signature = bubbleSignature(for: dataMessages[indexPath.row], at: indexPath)
+        let signature = bubbleSignature(for: dataMessages[indexPath.row])
         if builtSignature(of: cellMessage) == signature {
             // A pull that was interrupted can leave a bubble sitting off to one side. Building
             // the cell again used to clear that as a side effect of throwing the views away, so
@@ -12714,6 +13377,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         }
         emptyBubbleCell(cellMessage)
         setBuiltSignature(signature, on: cellMessage)
+        // What every tap in this bubble carries, so that it can find its row again when it is
+        // tapped - see rowForGesture.
+        let bubbleMessageId = dataMessages[indexPath.row]["message_id"] as? String ?? ""
         // See `applySelectionChrome`: while messages are being picked, a tap belongs to the row
         // and to nothing the row is carrying.
         cellMessage.contentView.isUserInteractionEnabled = !isSelectionSessionActive
@@ -12724,6 +13390,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         profileMessage.translatesAutoresizingMaskIntoConstraints = false
         let tapGestureRecognizer = ObjectGesture(target: self, action: #selector(profilePersonTapped(_:)))
         tapGestureRecognizer.message_id = dataMessages[indexPath.row]["f_pin"]  as? String ?? ""
+        tapGestureRecognizer.ownerMessageId = bubbleMessageId
         profileMessage.isUserInteractionEnabled = true
         profileMessage.addGestureRecognizer(tapGestureRecognizer)
         
@@ -13127,6 +13794,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 imageAckView.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -30).isActive = true
                 let tap = ObjectGesture(target: self, action: #selector(tapAck(_:)))
                 tap.indexPath = indexPath
+                tap.ownerMessageId = bubbleMessageId
                 imageAckView.addGestureRecognizer(tap)
                 imageAckView.isUserInteractionEnabled = true
             }
@@ -13274,13 +13942,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
             else {
                 applyReadMore(to: messageText, text: textChat, messageId: messageIdChat) {
-                    $0.richText(group_id: self.dataGroup["group_id"] as? String ?? "")
+                    self.bubbleRichText($0, groupId: self.dataGroup["group_id"] as? String ?? "")
                 }
                 modifyText(at: indexPath)
             }
         } else {
             applyReadMore(to: messageText, text: textChat, messageId: messageIdChat) {
-                $0.richText(group_id: self.dataGroup["group_id"] as? String ?? "")
+                self.bubbleRichText($0, groupId: self.dataGroup["group_id"] as? String ?? "")
             }
             modifyText(at: indexPath)
         }
@@ -13314,7 +13982,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
 
             // Must be mutable!
-            let finalAttributed = NSMutableAttributedString(attributedString: text.richText(group_id: self.dataGroup["group_id"]  as? String ?? ""))
+            let finalAttributed = bubbleRichText(text, groupId: self.dataGroup["group_id"]  as? String ?? "")
 
             let fullString = finalAttributed.string
             let fullLength = (fullString as NSString).length
@@ -13346,6 +14014,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             messageText.delegate = self
         }
         
+        let rowScope = dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String ?? ""
+        if isHistoryCC && (rowScope == MessageScope.CALL || rowScope == MessageScope.MISSED_CALL) {
+            buildCallRecord(in: containerMessage, replacing: messageText, under: senderNameLabel,
+                            row: dataMessages[indexPath.row])
+        }
+        
         if !copySession && !forwardSession && !deleteSession && !summarizeSession && !isHistoryCC && !removed {
             let interaction = UIContextMenuInteraction(delegate: self)
             containerMessage.addInteraction(interaction)
@@ -13358,8 +14032,19 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             // preview after the "■" - which the ordinary render strips before drawing. So
             // the moment a search was typed, every bubble with a link grew its "■" tail back.
             // The same rule the bubble, reply and copy use: see ChatMessageText.
-            applyReadMore(to: messageText, text: ChatMessageText.withoutLinkPreview(textChat), messageId: messageIdChat) {
-                $0.richText(isSearching: true, textSearch: self.textSearch, group_id: self.dataGroup["group_id"] as? String ?? "")
+            //
+            // A result is shown whole, never folded: it was found by all of its text, and a word
+            // it was found by could be in the part a fold would put away - counted, and nowhere
+            // to be seen lit up. The other conversation has always shown its results whole. Any
+            // other bubble is only lit up where it has a word of the query, and keeps its fold.
+            let groupId = self.dataGroup["group_id"] as? String ?? ""
+            let shownText = ChatMessageText.withoutLinkPreview(textChat)
+            if searchMatchIdSet.contains(messageIdChat) {
+                messageText.attributedText = shownText.richText(isSearching: true, textSearch: self.textSearch, group_id: groupId)
+            } else {
+                applyReadMore(to: messageText, text: shownText, messageId: messageIdChat) {
+                    $0.richText(isSearching: true, textSearch: self.textSearch, group_id: groupId)
+                }
             }
         }
         
@@ -13372,6 +14057,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     timeMessage.text = "00:0\(dataTimer!)"
                 }
                 timeMessage.textColor = .systemRed
+                timeMessage.tag = EditorGroup.countdownTag
             } else {
                 let date = Date(milliseconds: Int64(stringDate) ?? 100)
                 timeMessage.text = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
@@ -13849,6 +14535,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                                     if let bytes = bytes, let picture = UIImage.thumbnail(from: bytes) {
                                         Nexilis.imageCache.setObject(picture, forKey: tileId as NSString)
                                         made = drawTile(picture)
+                                    } else if let picture = ThumbnailFallback.fromFullImage(named: tileImageId) {
+                                        Nexilis.imageCache.setObject(picture, forKey: tileId as NSString)
+                                        made = drawTile(picture)
                                     }
                                     let finishedTile = made
                                     DispatchQueue.main.async {
@@ -13868,7 +14557,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                             // same file another completion to call - dozens of them by the time a transfer
                             // finished, every one of them reloading the same row. The transfer that is already
                             // running keeps the row up to date by itself now (see onDownloadChat).
-                            if !Download.isDownloading(forKey: listImages[i].thumbId) {
+                            if !tileId.isEmpty, ThumbnailFallback.isOnDevice(tileImageId) {
+                                ThumbnailFallback.load(fromImage: tileImageId, as: tileId) { [weak self] picture in
+                                    if picture != nil {
+                                        self?.reloadMessageRow(withFileNamed: tileId)
+                                    }
+                                }
+                            } else if !Download.isDownloading(forKey: listImages[i].thumbId) {
                                 Download().startHTTP(forKey: listImages[i].thumbId) { [weak self] (name, progress) in
                                     guard progress == 100 else {
                                         return
@@ -13958,6 +14653,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         objectTap.indexImageTapped = i
                         objectTap.listImageFromGrouping = listImages
                         objectTap.isInitiator = dataMessages[indexPath.row]["f_pin"] as? String == idMe
+                        objectTap.ownerMessageId = bubbleMessageId
                     }
                 }
                 // What the reference puts over the middle of a grid that has not been fetched:
@@ -14038,6 +14734,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         let askFor = missingNames
                         let pillTap = ObjectGesture(target: self, action: #selector(collageOfferTapped(_:)))
                         pillTap.collageFiles = askFor
+                        pillTap.ownerMessageId = bubbleMessageId
                         offerPill.addGestureRecognizer(pillTap)
                     } else {
                         // On their way: one stop with one arc, standing for all of them together.
@@ -14200,6 +14897,11 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                                 if let bytes = bytes, let picture = UIImage.thumbnail(from: bytes) {
                                     Nexilis.imageCache.setObject(picture, forKey: thumbChat as NSString)
                                     drawn = drawThumb(picture)
+                                } else if let picture = ThumbnailFallback.fromFullImage(named: imageChat) {
+                                    // The thumbnail will not decode; the picture is here - see
+                                    // ThumbnailFallback.
+                                    Nexilis.imageCache.setObject(picture, forKey: thumbChat as NSString)
+                                    drawn = drawThumb(picture)
                                 }
                                 let finished = drawn
                                 DispatchQueue.main.async {
@@ -14243,7 +14945,14 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         // same file another completion to call - dozens of them by the time a transfer
                         // finished, every one of them reloading the same row. The transfer that is already
                         // running keeps the row up to date by itself now (see onDownloadChat).
-                        if !Download.isDownloading(forKey: thumbChat) {
+                        if !thumbChat.isEmpty, ThumbnailFallback.isOnDevice(imageChat) {
+                            // No thumbnail to be had, but the picture is here: it stands in.
+                            ThumbnailFallback.load(fromImage: imageChat, as: thumbChat) { [weak self] picture in
+                                if picture != nil {
+                                    self?.reloadMessageRow(withFileNamed: thumbChat)
+                                }
+                            }
+                        } else if !Download.isDownloading(forKey: thumbChat) {
                             Download().startHTTP(forKey: thumbChat) { [weak self] (name, progress) in
                                 guard progress == 100 else {
                                     return
@@ -14528,6 +15237,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     objectTap.specFile = sfs
                     objectTap.imageView = imageThumb
                     objectTap.indexPath = indexPath
+                    objectTap.ownerMessageId = bubbleMessageId
                 }
             }
         }
@@ -14834,6 +15544,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 objectTap.file_id = fileChat
                 objectTap.specFile = sfs
                 objectTap.indexPath = indexPath
+                objectTap.ownerMessageId = bubbleMessageId
             }
         }
         
@@ -14905,6 +15616,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     if !copySession && !forwardSession && !deleteSession && !summarizeSession {
                         let objectTap = ObjectGesture(target: self, action: #selector(tapMessageText(_:)))
                         objectTap.message_id = text
+                        objectTap.ownerMessageId = bubbleMessageId
                         containerLinkMessage.addGestureRecognizer(objectTap)
                     }
                 }
@@ -15195,6 +15907,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     containerReply.addGestureRecognizer(objectTap)
                     objectTap.indexPath = indexPath
                     objectTap.message_id = data["message_id"]  as? String ?? ""
+                    objectTap.ownerMessageId = bubbleMessageId
                 }
             }
         }
@@ -16055,8 +16768,14 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
     }
     
     @objc func tapAck(_ sender: ObjectGesture) {
-        let indexPath = sender.indexPath
+        let indexPath = rowForGesture(sender)
+        guard indexPath.count == 2, indexPath.section < dataDates.count else {
+            return
+        }
         let dataMessages = self.messages(onDate: dataDates[indexPath.section])
+        guard indexPath.row < dataMessages.count else {
+            return
+        }
         if dataMessages[indexPath.row]["status"]  as? String ?? "" == "8" {
             return
         }
@@ -16110,7 +16829,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
         let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
         let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-        var indexPath = sender.indexPath
+        var indexPath = rowForGesture(sender)
         if indexPath.count == 0 {
             if let index = self.dataMessages.firstIndex(where: {$0["message_id"] as? String == sender.message_id}) {
                 let section = self.dataDates.firstIndex(of: self.dataMessages[index]["chat_date"]  as? String ?? "")
@@ -16342,7 +17061,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         print("Error reading secure file")
                     }
                 } else {
-                    beginTransfer(ofFileNamed: sender.image_id, from: sender.indexPath)
+                    beginTransfer(ofFileNamed: sender.image_id, from: indexPath)
                 }
             }
         } else if (sender.gif_id != "") {
@@ -16390,7 +17109,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         
                     }
                 } else {
-                    beginTransfer(ofFileNamed: sender.video_id, from: sender.indexPath)
+                    beginTransfer(ofFileNamed: sender.video_id, from: indexPath)
                 }
             }
         } else if (sender.file_id != "") {
@@ -16526,7 +17245,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         
                     }
                 } else {
-                    beginTransfer(ofFileNamed: sender.file_id, from: sender.indexPath)
+                    beginTransfer(ofFileNamed: sender.file_id, from: indexPath)
                 }
             }
         } else {
@@ -17278,6 +17997,9 @@ extension EditorGroup: UISearchBarDelegate {
 
     public func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
         timerSearch?.invalidate()
+        // The date button is only there while there is nothing to count - the bar cannot hold
+        // both it and the "x of N", and a reader who is typing a word is not looking for a day.
+        buttonDate?.isHidden = !searchText.isEmpty
         // Fix: nothing at all happened below two characters, so emptying the field - the clear
         // button, or backspacing down to one letter - left everything the last search had put on
         // screen exactly where it was: the old word still lit up in every bubble, the "x of N"
@@ -18422,7 +19144,7 @@ extension EditorGroup {
         guard !name.isEmpty else {
             return nil
         }
-        let fileKeys = ["image_id", "video_id", "file_id", "audio_id", "thumb_id", "gif_id"]
+        let fileKeys = EditorGroup.fileKeys
         var messageId: String?
         if let index = dataMessages.lastIndex(where: { message in
             return fileKeys.contains(where: { (message[$0] as? String ?? "") == name })
@@ -18461,7 +19183,6 @@ extension EditorGroup {
     // Reloads the row a transfer belongs to, if it is still on screen at all. Safe to call
     // from a download that outlived the screen which started it.
     func reloadMessageRow(withFileNamed name: String) {
-        EditorGroup.transferTick += 1
         guard Thread.isMainThread else {
             // Transfers finish on whatever thread carried them; the table is the main thread's.
             DispatchQueue.main.async { [weak self] in
@@ -18472,8 +19193,10 @@ extension EditorGroup {
         guard let indexPath = indexPathForMessage(withFileNamed: name),
               indexPath.section < tableChatView.numberOfSections,
               indexPath.row < tableChatView.numberOfRows(inSection: indexPath.section) else {
+            transferTicks[name, default: 0] += 1
             return
         }
+        transferTicks[name, default: 0] += 1
         // The row has to exist on both sides. The table is told about changes a moment after the
         // list itself changes, so between the two it can hold a row the list no longer has -
         // asking it to redraw that one draws a blank.

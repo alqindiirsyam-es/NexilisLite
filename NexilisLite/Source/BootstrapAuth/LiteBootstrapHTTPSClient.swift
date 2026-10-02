@@ -35,6 +35,17 @@ enum LiteBootstrapKeys {
     static let publicKey = "PUK"
     /// The business entity key: required on /login, /otp/send and /otp/verify.
     static let businessEntity = "Api"
+    /// Mode 2 first install (SUAI02 over HTTPS), as Android's BootstrapMiddleActivity sends them.
+    static let appVersion = "APV"
+    static let buildVersion = "Bd"
+    /// "0" normally; "1" only after the person agreed to create a new account (legacy code 20).
+    static let forceNewUser = "FLA"
+    /// "1" signed in to an existing account, "0" a new one was created.
+    static let signUpFlag = "sg"
+    /// Multiple login: anything but "0" is refused here.
+    static let multipleLogin = "LSG"
+    static let loginMethod = "FLM"
+    static let boundConnectionID = "Bb"
 }
 
 struct LiteBootstrapError: LocalizedError {
@@ -59,6 +70,9 @@ final class LiteBootstrapHTTPSClient {
     func sendOtp(_ body: [String: Any]) async throws -> [String: Any] { try await post("otp/send", body) }
     func verifyOtp(_ body: [String: Any]) async throws -> [String: Any] { try await post("otp/verify", body) }
     func tfa(_ body: [String: Any]) async throws -> [String: Any] { try await post("tfa", body) }
+    /// Mode 2 (Middle) first install: the SUAI02 sign-in/sign-up, which answers with the assertion itself -
+    /// there is no separate TFA stage on this path (Android: BootstrapHttpsAuthClient.middleSignInUp).
+    func signInPrepare(_ body: [String: Any]) async throws -> [String: Any] { try await post("sign-in/prepare", body) }
 
     private func post(_ path: String, _ body: [String: Any]) async throws -> [String: Any] {
         // Barrier #1 first, whoever called: defense in depth, not only the order of the chain.
@@ -71,6 +85,21 @@ final class LiteBootstrapHTTPSClient {
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         request.setValue("Bearer " + installToken, forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        if path == "sign-in/prepare" {
+            func isPresent(_ key: String) -> Bool {
+                guard let value = body[key] else { return false }
+                if let text = value as? String { return !text.isEmpty }
+                return true
+            }
+            NXLogger.general.publicError(
+                "[BootstrapAuth] sign-in/prepare payload " +
+                "FPR=\(isPresent(LiteBootstrapKeys.fingerprint) ? "yes" : "no") " +
+                "SIG=\(isPresent(LiteBootstrapKeys.signature) ? "yes" : "no") " +
+                "PUK=\(isPresent(LiteBootstrapKeys.publicKey) ? "yes" : "no") " +
+                "BOOTSTRAP_REQUEST_ID=\(isPresent("BOOTSTRAP_REQUEST_ID") ? "yes" : "no")"
+            )
+        }
 
         let (stream, response) = try await Self.session.bytes(for: request)
         guard let http = response as? HTTPURLResponse else { throw LiteBootstrapError("Respons autentikasi bootstrap tidak valid.") }

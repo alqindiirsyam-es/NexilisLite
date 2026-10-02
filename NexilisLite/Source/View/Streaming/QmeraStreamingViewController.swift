@@ -191,10 +191,31 @@ class QmeraStreamingViewController: UIViewController {
     }
 
     @objc func didTapSpeakerButton(_ sender: UIButton) {
-        QmeraStreamingViewController.isSpeakerPhone.toggle()
+        applySpeaker(on: !QmeraStreamingViewController.isSpeakerPhone)
+    }
+
+    /// Puts the sound where it was asked for, and says so on the speaker button.
+    ///
+    /// Fix: a viewer could not hear the stream through the speaker. The speaker was put on by
+    /// pretending to tap the button - a toggle - and the choice is static and was never reset, so
+    /// the toggle that turned it on for the first stream turned it off for the next: the sound
+    /// went to the earpiece. The pretend tap was on a new button, too, so the real one still
+    /// showed the speaker on. The choice is set now, not flipped, and drawn on the real button.
+    private func applySpeaker(on: Bool) {
+        QmeraStreamingViewController.isSpeakerPhone = on
         QmeraStreamingViewController.turnSpeakerOn()
-        let imageName = QmeraStreamingViewController.isSpeakerPhone ? "speaker.wave.2.fill" : "speaker.slash"
-        sender.setImage(UIImage(systemName: imageName), for: .normal)
+        buttonSpeaker.setImage(UIImage(systemName: on ? "speaker.wave.2.fill" : "speaker.slash"), for: .normal)
+    }
+
+    /// iOS drops a speaker override whenever the route or the category changes - which the SDK
+    /// does as it joins - and the sound falls back to the earpiece. While the speaker is the
+    /// choice, it is put back.
+    @objc private func audioRouteChanged(_ notification: Notification) {
+        guard QmeraStreamingViewController.isSpeakerPhone,
+              AVAudioSession.sharedInstance().currentRoute.outputs.contains(where: { $0.portType == .builtInReceiver }) else {
+            return
+        }
+        QmeraStreamingViewController.turnSpeakerOn()
     }
     
     var alert: UIAlertController?
@@ -202,6 +223,27 @@ class QmeraStreamingViewController: UIViewController {
     let statusView = UIView()
     
     static private var isLoop = false
+    /// Where the audio watch below checks and restarts the engine, and where it is stopped.
+    ///
+    /// Fix: a crash on leaving a live stream - AVAudioEngine raised from inside the SDK's own
+    /// teardown (MediaBR.endJoin -> stopAudio -> disconnectNodeOutput) while the watch, on another
+    /// thread, was restarting the same engine. Nothing ever stopped the watch either: `isLoop` was
+    /// set and never cleared, so it went on restarting the engine after the stream had gone. It is
+    /// stopped on this queue before the stream is ended, so a restart in progress finishes first and
+    /// none starts after.
+    static private let audioWatchQueue = DispatchQueue(label: "io.nexilis.streaming.audioWatch")
+
+    /// Set once this stream is being left or has ended, so a watch that was about to start - it
+    /// starts a second after joining - does not start after the engine has been torn down.
+    static private var audioWatchStopped = false
+
+    /// Ends the audio watch, waiting out a restart that is under way. Off the main thread only.
+    static private func stopAudioWatch() {
+        audioWatchQueue.sync {
+            audioWatchStopped = true
+            isLoop = false
+        }
+    }
     
     private func backToDefaultAudioSession() {
         do {
@@ -216,6 +258,13 @@ class QmeraStreamingViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        // A new stream: its audio watch may run once it has been joined.
+        QmeraStreamingViewController.audioWatchQueue.async { QmeraStreamingViewController.audioWatchStopped = false }
+        // And its sound starts on the speaker, which is what the button and the session below
+        // both say - whatever the last stream was left on.
+        QmeraStreamingViewController.isSpeakerPhone = true
+        NotificationCenter.default.addObserver(self, selector: #selector(audioRouteChanged(_:)),
+                                               name: AVAudioSession.routeChangeNotification, object: nil)
         
         navigationController?.changeAppearance(clear: true)
         
@@ -380,6 +429,7 @@ class QmeraStreamingViewController: UIViewController {
         alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: nil))
         alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: {[weak self] _ in
             DispatchQueue.global().async {
+                QmeraStreamingViewController.stopAudioWatch()
                 API.terminateBC(sBroadcasterID: self?.isLive ?? true ? nil : self?.data)
                 self?.sendLeft()
             }
@@ -718,16 +768,30 @@ extension QmeraStreamingViewController: LiveStreamingDelegate {
                 DispatchQueue.main.async {
                     self.buttonSpeaker.isEnabled = false
                 }
-                QmeraStreamingViewController.isLoop = true
+                var starting = false
+                QmeraStreamingViewController.audioWatchQueue.sync {
+                    if !QmeraStreamingViewController.audioWatchStopped {
+                        QmeraStreamingViewController.isLoop = true
+                        starting = true
+                    }
+                }
+                // Left in the second before the watch was due: nothing to watch.
+                guard starting else { return }
                 DispatchQueue.global(qos: .userInitiated).async {
                     var countLoop = 0
                     repeat {
                         Thread.sleep(forTimeInterval : 0.5)
-                        if (QmeraStreamingViewController.isLoop && !API.bAudioEngineIsRunning()) {
-                            API.restartAudioEngine()
+                        var restarted = false
+                        QmeraStreamingViewController.audioWatchQueue.sync {
+                            if QmeraStreamingViewController.isLoop && !API.bAudioEngineIsRunning() {
+                                API.restartAudioEngine()
+                                restarted = true
+                            }
+                        }
+                        if restarted {
                             DispatchQueue.main.async {
                                 if !self.buttonSpeaker.isEnabled {
-                                    self.didTapSpeakerButton(UIButton())
+                                    self.applySpeaker(on: QmeraStreamingViewController.isSpeakerPhone)
                                     self.buttonSpeaker.isEnabled = true
                                 } else if QmeraStreamingViewController.isSpeakerPhone {
                                     do {
@@ -743,7 +807,7 @@ extension QmeraStreamingViewController: LiveStreamingDelegate {
                         if countLoop == 3 {
                             DispatchQueue.main.async {
                                 if !self.buttonSpeaker.isEnabled{
-                                    self.didTapSpeakerButton(UIButton())
+                                    self.applySpeaker(on: QmeraStreamingViewController.isSpeakerPhone)
                                     self.buttonSpeaker.isEnabled = true
                                 }
                             }
@@ -767,6 +831,8 @@ extension QmeraStreamingViewController: LiveStreamingDelegate {
                 }
             }
         } else if state == Nexilis.STREAMING_SEMINAR_ENDED {
+            // The stream is over: no more restarting its audio.
+            DispatchQueue.global().async { QmeraStreamingViewController.stopAudioWatch() }
             DispatchQueue.main.async {
                 self.status.text = "Streaming ended".localized()
                 let size = self.status.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: self.status.frame.height))

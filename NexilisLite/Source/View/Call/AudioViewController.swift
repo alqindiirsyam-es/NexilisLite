@@ -185,10 +185,16 @@ extension UIImageView {
     func setImage(name url: String, placeholderImage: UIImage? = nil) {
         let tmpAddress = String(format: "%p", unsafeBitCast(self, to: Int.self))
         UIImageView.urlStore[tmpAddress] = url
-        
+
+        // Every caller of this is a person's picture, and "no picture" has one answer everywhere: the
+        // person icon. Left to the callers it was not one answer - a contact with no usable photo came up
+        // blank in the lists and as the storyboard's grey box on the profile screen.
+        let placeholder = placeholderImage
+            ?? UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+
         guard !url.isEmpty else {
-            if let image = placeholderImage {
-                self.image = image
+            if let placeholder {
+                self.image = placeholder
             }
             return
         }
@@ -196,19 +202,36 @@ extension UIImageView {
         do {
             let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             let file = documentDir.appendingPathComponent(url)
-            if FileManager().fileExists(atPath: file.path) {
-                self.image = UIImage(contentsOfFile: file.path)
-                self.backgroundColor = .clear
+            if FileManager.default.fileExists(atPath: file.path) {
+                // A file that is there but will not decode - a download cut short, an empty file left
+                // behind - used to be assigned as nil AND clear the background with it, so the view showed
+                // nothing at all rather than the person icon.
+                if let decoded = UIImage(contentsOfFile: file.path) {
+                    self.image = decoded
+                    self.backgroundColor = .clear
+                } else if let placeholder {
+                    self.image = placeholder
+                }
             } else if FileEncryption.shared.isSecureExists(filename: url) {
                 if var dataFile = try? FileEncryption.shared.readSecure(filename: url) {
                     let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: dataFile)
                     if dataDecrypt != nil {
                         dataFile = dataDecrypt!
                     }
-                    self.image = UIImage(data: dataFile)
-                    self.backgroundColor = .clear
+                    if let decoded = UIImage(data: dataFile) {
+                        self.image = decoded
+                        self.backgroundColor = .clear
+                    } else if let placeholder {
+                        self.image = placeholder
+                    }
+                } else if let placeholder {
+                    self.image = placeholder
                 }
             } else {
+                // Nothing local yet: the icon stands in until the download lands.
+                if self.image == nil, let placeholder {
+                    self.image = placeholder
+                }
                 Download().startHTTP(forKey: url) { (name, progress) in
                     print ("masuk download \(progress)")
                     guard progress == 100 else {
@@ -222,14 +245,20 @@ extension UIImageView {
                                 if dataDecrypt != nil {
                                     dataFile = dataDecrypt!
                                 }
-                                self.image = UIImage(data: dataFile)
-                                self.backgroundColor = .clear
+                                if let decoded = UIImage(data: dataFile) {
+                                    self.image = decoded
+                                    self.backgroundColor = .clear
+                                }
                             }
                         }
                     }
                 }
             }
-        } catch {}
+        } catch {
+            if let placeholder {
+                self.image = placeholder
+            }
+        }
     }
     
 }

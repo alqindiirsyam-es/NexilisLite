@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import os.log
 import nuSDKService
 import AVFoundation
 import AVKit
@@ -24,8 +25,20 @@ import NexilisSecurityShield
 #endif
 import AudioToolbox
 
+/// Release-visible call tracing. Never log PINs, names, packet IDs or raw SDK messages.
+enum NexilisCallDiagnostics {
+    private static let log = OSLog(subsystem: "io.nexilis.call-diagnostics", category: "CallFlow")
+    static func record(_ event: String) {
+        os_log("%{public}@", log: log, type: .default, event)
+    }
+    static func errorCode(_ code: String) -> String {
+        guard !code.isEmpty, code.count <= 4, code.allSatisfy({ $0.isNumber }) else { return "invalid" }
+        return code
+    }
+}
+
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "6.0.7"
+    public static var cpaasVersion = "6.0.8"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -293,9 +306,7 @@ public class Nexilis: NSObject {
         
         InquiryThread.default.run()
         
-        if UIFont.systemFont(ofSize: 12).familyName == ".AppleSystemUIFont" {
-            UIFont.libOverrideInitialize()
-        }
+        UIFont.installLibraryFace()
         
         _ = LocationManager()
         FileEncryption.shared.wipeFolderOldSecure()
@@ -1190,6 +1201,8 @@ public class Nexilis: NSObject {
     }
     
     public static func destroyAll() {
+        ContactCenterRequestGate.reset()
+        ContactCenterSession.shared.discardPendingEditor()
         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
         if !onGoingCC.isEmpty {
             let requester = onGoingCC.components(separatedBy: ",")[0]
@@ -1202,7 +1215,7 @@ public class Nexilis: NSObject {
                 do {
                     _ = try Database.shared.insertRecord(fmdb: fmdb, table: "CALL_CENTER_HISTORY", cvalues: [
                         "type" : "0",
-                        "title" : "Contact Center".localized(),
+                        "title" : "Call Center".localized(),
                         "time" : startTimeCC,
                         "f_pin" : officer,
                         "data" : complaintId,
@@ -1914,8 +1927,11 @@ public class Nexilis: NSObject {
     /// the same critical section that finds it. A second answer finds no group; a timeout that
     /// races an answer finds no group; and a group is only ever left by the one that removed it.
     public static func writeAndWait(message: TMessage, timeout: Int = 15 * 1000) -> TMessage? {
+        let tracingCall = message.getCode() == CoreMessage_TMessageCode.CALLING
+        if tracingCall { NexilisCallDiagnostics.record("caller.probe.begin") }
         let status = message.getStatus()
         if status.isEmpty {
+            if tracingCall { NexilisCallDiagnostics.record("caller.probe.skip reason=missing_status") }
             return nil
         }
 
@@ -1943,6 +1959,7 @@ public class Nexilis: NSObject {
                 // Nobody answered, so nobody left it: balanced here, outside the lock.
                 groupWait.leave()
             }
+            if tracingCall { NexilisCallDiagnostics.record("caller.probe.timeout") }
             return nil
         }
 
@@ -1952,6 +1969,10 @@ public class Nexilis: NSObject {
                 listDispatchGroups.removeValue(forKey: status)
             }
             response = waitQueue.removeValue(forKey: status)
+        }
+        if tracingCall {
+            let code = NexilisCallDiagnostics.errorCode(response?.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") ?? "99")
+            NexilisCallDiagnostics.record("caller.probe.response code=\(code) present=\(response != nil)")
         }
         return response
     }
@@ -3217,6 +3238,39 @@ struct LibFontName {
     static let italic = "Poppins-Italic"
     static let medium = "Poppins-Medium"
     static let boldItalic = "Poppins-SemiBoldItalic"
+
+    /// Five faces ship with the framework, and these are all of them - there is no Light, no
+    /// Bold and no Black. A weight is answered by the nearest face that exists, and never by an
+    /// italic one: an upright weight asked for and a slanted face handed back is a bug, not a
+    /// substitution.
+    static func face(forWeight weight: UIFont.Weight) -> String {
+        switch weight {
+        case .medium:
+            return medium
+        case .semibold, .bold, .heavy, .black:
+            return bold
+        default:
+            // ultraLight, thin, light and regular: Regular is the lightest face there is.
+            return regular
+        }
+    }
+
+    /// The face for a font UIKit has already worked out - used where the size and weight come
+    /// from the system rather than from a call of ours, as they do for a text style.
+    static func face(matching descriptor: UIFontDescriptor) -> String {
+        let traits = descriptor.symbolicTraits
+        let slanted = traits.contains(.traitItalic)
+        let measured = (descriptor.object(forKey: .traits) as? [UIFontDescriptor.TraitKey: Any])?[.weight] as? CGFloat
+        // UIFont.Weight is a raw CGFloat: regular is 0, medium 0.23, semibold 0.3, bold 0.4.
+        let weight = measured ?? (traits.contains(.traitBold) ? UIFont.Weight.bold.rawValue : 0)
+        if weight >= UIFont.Weight.semibold.rawValue {
+            return slanted ? boldItalic : bold
+        }
+        if weight >= UIFont.Weight.medium.rawValue {
+            return slanted ? italic : medium
+        }
+        return slanted ? italic : regular
+    }
 }
 
 extension UIFontDescriptor.AttributeName {
@@ -3227,40 +3281,120 @@ extension UIFont {
     static var isOverrided: Bool = false
     static let FONT_SELECT = 0
 
-    @objc class func libSystemFont(ofSize size: CGFloat) -> UIFont? {
-        if UIFont(name: LibFontName.regular, size: size) == nil {
-            jbs_registerFont(withFilenameString: LibFontName.regular)
+    /// Faces already loaded, by name and size.
+    ///
+    /// Fix: every one of these used to ask `UIFont(name:size:)` twice - once to find out whether
+    /// the face was registered and once for the font itself - and the calls below are on the path
+    /// that draws every label in the app. A text style asks on top of that, which is UIKit's own
+    /// path and busier still.
+    private static var libFaces: [String: UIFont] = [:]
+    private static let libFacesLock = NSLock()
+
+    /// The Poppins face called `name` at `size`, or nil where the file is not there to be had.
+    static func libFace(_ name: String, _ size: CGFloat) -> UIFont? {
+        let key = "\(name)|\(size)"
+        libFacesLock.lock()
+        let known = libFaces[key]
+        libFacesLock.unlock()
+        if let known = known {
+            return known
         }
-        return UIFont(name: LibFontName.regular, size: size)
-    }
-    
-    @objc class func libSystemFontWeight(ofSize size: CGFloat, weight: UIFont.Weight) -> UIFont? {
-        if weight == .medium {
-            if UIFont(name: LibFontName.medium, size: size) == nil {
-                jbs_registerFont(withFilenameString: LibFontName.medium)
-            }
-            return UIFont(name: LibFontName.medium, size: size)
-        } else if weight == .semibold {
-            if UIFont(name: LibFontName.boldItalic, size: size) == nil {
-                jbs_registerFont(withFilenameString: LibFontName.boldItalic)
-            }
-            return UIFont(name: LibFontName.boldItalic, size: size)
+        var font = UIFont(name: name, size: size)
+        if font == nil {
+            jbs_registerFont(withFilenameString: name)
+            font = UIFont(name: name, size: size)
         }
-        return UIFont(name: LibFontName.regular, size: size)
+        guard let font = font else {
+            return nil
+        }
+        libFacesLock.lock()
+        libFaces[key] = font
+        libFacesLock.unlock()
+        return font
     }
 
-    @objc class func libBoldSystemFont(ofSize size: CGFloat) -> UIFont? {
-        if UIFont(name: LibFontName.bold, size: size) == nil {
-            jbs_registerFont(withFilenameString: LibFontName.bold)
-        }
-        return UIFont(name: LibFontName.bold, size: size)
+    // Each of these is exchanged with the system method of the same shape, so calling the lib
+    // name from inside one of them reaches the system's own implementation - which is how a face
+    // that is missing falls back to the system font rather than to nil. These return a
+    // non-optional deliberately: the methods they stand in for do, and a nil handed back through
+    // an exchanged implementation is a crash in every caller that never expected one.
+    @objc class func libSystemFont(ofSize size: CGFloat) -> UIFont {
+        return libFace(LibFontName.regular, size) ?? libSystemFont(ofSize: size)
     }
 
-    @objc class func libItalicSystemFont(ofSize size: CGFloat) -> UIFont? {
-        if UIFont(name: LibFontName.italic, size: size) == nil {
-            jbs_registerFont(withFilenameString: LibFontName.italic)
+    @objc class func libSystemFontWeight(ofSize size: CGFloat, weight: UIFont.Weight) -> UIFont {
+        return libFace(LibFontName.face(forWeight: weight), size)
+            ?? libSystemFontWeight(ofSize: size, weight: weight)
+    }
+
+    @objc class func libBoldSystemFont(ofSize size: CGFloat) -> UIFont {
+        return libFace(LibFontName.bold, size) ?? libBoldSystemFont(ofSize: size)
+    }
+
+    @objc class func libItalicSystemFont(ofSize size: CGFloat) -> UIFont {
+        return libFace(LibFontName.italic, size) ?? libItalicSystemFont(ofSize: size)
+    }
+
+    /// The same attributes with the framework's face in them.
+    ///
+    /// A caller that already chose a font keeps its size and its weight and only changes face; a
+    /// caller that chose none - which is nearly all of them, because they are setting a colour -
+    /// is given the face at the size UIKit would have used. Attributes of nil mean "back to the
+    /// default", and the default is the system face, so those are answered with the face alone.
+    static func libKeepingFace(in attributes: [NSAttributedString.Key: Any]?,
+                               size: CGFloat, weight: UIFont.Weight) -> [NSAttributedString.Key: Any] {
+        var kept = attributes ?? [:]
+        if let chosen = kept[.font] as? UIFont {
+            kept[.font] = libFace(LibFontName.face(matching: chosen.fontDescriptor), chosen.pointSize) ?? chosen
+        } else {
+            kept[.font] = UIFont.systemFont(ofSize: size, weight: weight)
         }
-        return UIFont(name: LibFontName.italic, size: size)
+        return kept
+    }
+
+    /// A navigation bar's appearance with the framework's face on its title and on its buttons.
+    ///
+    /// Fix: a screen that installs one of these takes its buttons' look from the appearance
+    /// object, not from UIBarButtonItem.appearance() - so the Cancel in the top left of the
+    /// contact list stayed in the system face however the item proxy was set up. The button
+    /// appearances inside are dressed here, which is the only place all of them pass through.
+    @available(iOS 13.0, *)
+    static func libDress(_ appearance: UINavigationBarAppearance) -> UINavigationBarAppearance {
+        appearance.titleTextAttributes = libKeepingFace(in: appearance.titleTextAttributes,
+                                                        size: 17, weight: .semibold)
+        appearance.largeTitleTextAttributes = libKeepingFace(in: appearance.largeTitleTextAttributes,
+                                                             size: 34, weight: .bold)
+        // Done is the emphasised one, and the back button carries the same weight as a plain one.
+        libDress(appearance.buttonAppearance, weight: .regular)
+        libDress(appearance.doneButtonAppearance, weight: .semibold)
+        libDress(appearance.backButtonAppearance, weight: .regular)
+        return appearance
+    }
+
+    @available(iOS 13.0, *)
+    private static func libDress(_ button: UIBarButtonItemAppearance, weight: UIFont.Weight) {
+        for state in [button.normal, button.highlighted, button.disabled, button.focused] {
+            state.titleTextAttributes = libKeepingFace(in: state.titleTextAttributes, size: 17, weight: weight)
+        }
+    }
+
+    /// The font for one of the system's text styles.
+    ///
+    /// Fix: this is the one that was missing, and it is why so much of the app was still in the
+    /// system face. Exchanging systemFont(ofSize:) only reaches the calls *this code* makes.
+    /// UIKit does not draw its own furniture that way - a navigation bar's title, a bar button, a
+    /// table cell's labels, the title inside a UIButton.Configuration and the text in an alert
+    /// all come from a text style. The size and the weight are still the system's, worked out for
+    /// whatever text size the reader has chosen; only the face is ours.
+    @objc class func libPreferredFont(forTextStyle style: UIFont.TextStyle) -> UIFont {
+        let system = libPreferredFont(forTextStyle: style)
+        return libFace(LibFontName.face(matching: system.fontDescriptor), system.pointSize) ?? system
+    }
+
+    @objc class func libPreferredFont(forTextStyle style: UIFont.TextStyle,
+                                      compatibleWith traits: UITraitCollection?) -> UIFont {
+        let system = libPreferredFont(forTextStyle: style, compatibleWith: traits)
+        return libFace(LibFontName.face(matching: system.fontDescriptor), system.pointSize) ?? system
     }
 
     @objc convenience init(myCoder aDecoder: NSCoder) {
@@ -3282,6 +3416,19 @@ extension UIFont {
             fontName = LibFontName.regular
         }
         self.init(name: fontName, size: fontDescriptor.pointSize)!
+    }
+
+    /// Puts the framework's face in place of the system one, everywhere, for the rest of this
+    /// launch. Safe to call more than once and from any entry point: the exchange happens on the
+    /// first call and every later one returns at the guard.
+    public class func installLibraryFace() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.sync {
+                UIFont.installLibraryFace()
+            }
+            return
+        }
+        libOverrideInitialize()
     }
 
     class func libOverrideInitialize() {
@@ -3310,12 +3457,57 @@ extension UIFont {
             method_exchangeImplementations(italicSystemFontMethod, myItalicSystemFontMethod)
         }
 
+        if let preferredMethod = class_getClassMethod(self, #selector(preferredFont(forTextStyle:))),
+           let myPreferredMethod = class_getClassMethod(self, #selector(libPreferredFont(forTextStyle:))) {
+            method_exchangeImplementations(preferredMethod, myPreferredMethod)
+        }
+
+        if let preferredTraitsMethod = class_getClassMethod(self, #selector(preferredFont(forTextStyle:compatibleWith:))),
+           let myPreferredTraitsMethod = class_getClassMethod(self, #selector(libPreferredFont(forTextStyle:compatibleWith:))) {
+            method_exchangeImplementations(preferredTraitsMethod, myPreferredTraitsMethod)
+        }
+
+        // The bars. Their titles and their buttons are written by UIKit from attribute
+        // dictionaries the screens hand over, and about a hundred places in this framework hand
+        // over a dictionary holding a colour and nothing else - which leaves the face to UIKit,
+        // and UIKit's face is the system's. Every way in is caught here rather than at each of
+        // those hundred places: what goes in keeps whatever the caller chose and gains our face.
+        libExchange(UINavigationBar.self, #selector(setter: UINavigationBar.titleTextAttributes),
+                    #selector(UINavigationBar.libSetTitleTextAttributes(_:)))
+        libExchange(UINavigationBar.self, #selector(setter: UINavigationBar.largeTitleTextAttributes),
+                    #selector(UINavigationBar.libSetLargeTitleTextAttributes(_:)))
+        libExchange(UINavigationBar.self, #selector(setter: UINavigationBar.standardAppearance),
+                    #selector(UINavigationBar.libSetStandardAppearance(_:)))
+        libExchange(UINavigationBar.self, #selector(setter: UINavigationBar.scrollEdgeAppearance),
+                    #selector(UINavigationBar.libSetScrollEdgeAppearance(_:)))
+        libExchange(UINavigationBar.self, #selector(setter: UINavigationBar.compactAppearance),
+                    #selector(UINavigationBar.libSetCompactAppearance(_:)))
+        libExchange(UIBarButtonItem.self, #selector(UIBarButtonItem.setTitleTextAttributes(_:for:)),
+                    #selector(UIBarButtonItem.libSetTitleTextAttributes(_:for:)))
+
+        // And the bar buttons nobody dresses at all - a Cancel put in a navigation item and left
+        // as it comes. The proxy reaches every one of them, in all the states a button passes
+        // through while a finger is on it.
+        let plain: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 17)]
+        for state in [UIControl.State.normal, .highlighted, .disabled, .selected] {
+            UIBarButtonItem.appearance().setTitleTextAttributes(plain, for: state)
+        }
+
         if let initCoderMethod = class_getInstanceMethod(self, #selector(UIFontDescriptor.init(coder:))), // Trick to get over the lack of UIFont.init(coder:))
             let myInitCoderMethod = class_getInstanceMethod(self, #selector(UIFont.init(myCoder:))) {
             method_exchangeImplementations(initCoderMethod, myInitCoderMethod)
         }
     }
     
+    /// Swaps one instance method for another, where both are there to be swapped.
+    private class func libExchange(_ owner: AnyClass, _ original: Selector, _ ours: Selector) {
+        guard let first = class_getInstanceMethod(owner, original),
+              let second = class_getInstanceMethod(owner, ours) else {
+            return
+        }
+        method_exchangeImplementations(first, second)
+    }
+
     class func jbs_registerFont(withFilenameString filenameString: String) {
 
 //        guard let pathForResourceString = Bundle.resourceBundle(for: Nexilis.self).path(forResource: filenameString, ofType: "otf") else { //resourcesMediaBundle
@@ -3333,8 +3525,14 @@ extension UIFont {
 //            return
 //        }
         
+        // Fix: this force-unwrapped, so asking for a face whose file is not in the bundle - a
+        // name spelt differently, a file dropped from the resources - brought the app down while
+        // drawing a label. A face that cannot be found leaves the caller on the system font.
+        guard let pathForResourceURL = pathForResourceURL else {
+            return
+        }
         var errorRef: Unmanaged<CFError>? = nil
-        CTFontManagerRegisterFontsForURL(pathForResourceURL! as CFURL, .process, &errorRef)
+        CTFontManagerRegisterFontsForURL(pathForResourceURL as CFURL, .process, &errorRef)
 
 //        guard let fontData = NSData(contentsOfFile: pathForResourceString) else {
 //            //print("UIFont+:  Failed to register font - font data could not be loaded.")
@@ -3354,6 +3552,37 @@ extension UIFont {
 //        var errorRef: Unmanaged<CFError>? = nil
 //        if (CTFontManagerRegisterGraphicsFont(font, &errorRef) == false) {
 //        }
+    }
+}
+
+extension UINavigationBar {
+    @objc func libSetTitleTextAttributes(_ attributes: [NSAttributedString.Key: Any]?) {
+        libSetTitleTextAttributes(UIFont.libKeepingFace(in: attributes, size: 17, weight: .semibold))
+    }
+
+    @objc func libSetLargeTitleTextAttributes(_ attributes: [NSAttributedString.Key: Any]?) {
+        libSetLargeTitleTextAttributes(UIFont.libKeepingFace(in: attributes, size: 34, weight: .bold))
+    }
+
+    @objc func libSetStandardAppearance(_ appearance: UINavigationBarAppearance) {
+        libSetStandardAppearance(UIFont.libDress(appearance))
+    }
+
+    @objc func libSetScrollEdgeAppearance(_ appearance: UINavigationBarAppearance?) {
+        libSetScrollEdgeAppearance(appearance.map { UIFont.libDress($0) })
+    }
+
+    @objc func libSetCompactAppearance(_ appearance: UINavigationBarAppearance?) {
+        libSetCompactAppearance(appearance.map { UIFont.libDress($0) })
+    }
+}
+
+extension UIBarButtonItem {
+    @objc func libSetTitleTextAttributes(_ attributes: [NSAttributedString.Key: Any]?,
+                                         for state: UIControl.State) {
+        // Done is the emphasised style, and the system draws it heavier; everything else is plain.
+        let weight: UIFont.Weight = self.style == .done ? .semibold : .regular
+        libSetTitleTextAttributes(UIFont.libKeepingFace(in: attributes, size: 17, weight: weight), for: state)
     }
 }
 
@@ -3449,108 +3678,64 @@ public var uuidOngoing = UUID()
 extension Nexilis: CallDelegate {
     
     public func onIncomingCall(state: Int, message: String) {
+        NexilisCallDiagnostics.record("incoming.route.begin state=\(state)")
         DispatchQueue.main.async {
-            let idMe = User.getMyPin()!
-            let myData = User.getData(pin: idMe)
-            let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
-            if !onGoingCC.isEmpty {
+            let fields = message.components(separatedBy: ",")
+            guard fields.count >= 2, !fields[0].isEmpty,
+                  state == Nexilis.AUDIO_CALL_INCOMING || state == Nexilis.VIDEO_CALL_INCOMING else {
+                NexilisCallDiagnostics.record("incoming.route.skip reason=malformed_or_state")
                 return
             }
-            let deviceId = message.split(separator: ",")[0]
-            if myData?.offline_mode == "1" || self.stateUnfriend == deviceId {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
-                    API.terminateCall(sParty: nil)
-                })
+            let callerId = fields[0]
+            guard fields[1] != "joining Ac.room on channel 0",
+                  fields[1] != "joining Vc.room on channel 0",
+                  let me = User.getMyPin() else {
+                NexilisCallDiagnostics.record("incoming.route.skip reason=room_or_no_user")
                 return
             }
-            var isShowAlert: Double?
-            let canShow = UIApplication.shared.visibleViewController
-            if canShow != nil && !(canShow is UINavigationController) {
-                if !(canShow is EditorPersonal) {
-                    isShowAlert = 0
-                } else {
-                    isShowAlert = 1.5
-                }
-            } else if canShow != nil {
-                if canShow is UINavigationController {
-                    let canShowNC = canShow as! UINavigationController
-                    if !(canShowNC.visibleViewController is EditorPersonal) {
-                        isShowAlert = 0
-                    } else {
-                        isShowAlert = 1.5
-                    }
-                } else {
-                    isShowAlert = 0
-                }
+            let ongoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+            guard ongoingCC.isEmpty else {
+                NexilisCallDiagnostics.record("incoming.route.skip reason=ongoing_contact_center")
+                return
             }
-            if (state == Nexilis.AUDIO_CALL_INCOMING && message.split(separator: ",")[1] != "joining Ac.room on channel 0" && message.split(separator: ",")[1] != "joining Vc.room on channel 0") {
-                if Nexilis.callAPNActivated || APIS.checkAppStateisBackground() {
-                    return
+            let acceptCallDisabled = User.getData(pin: me)?.offline_mode == "1"
+            if acceptCallDisabled || self.stateUnfriend == callerId {
+                NexilisCallDiagnostics.record("incoming.route.reject reason=offline_or_blocked")
+                // Push-originated calls record their missed call in the push policy
+                // path. Only the foreground SDK flow owns this record here.
+                if acceptCallDisabled && !Nexilis.callAPNActivated && !APIS.checkAppStateisBackground() {
+                    CallManager.shared.recordSocketPolicyMissedCall(callerId: callerId,
+                        isVideo: state == Nexilis.VIDEO_CALL_INCOMING)
                 }
-                let data = User.getDataCanNil(pin: String(deviceId))
-                if data == nil {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
-                        API.terminateCall(sParty: nil)
-                    })
-                    return
-                }
-                let controller = QmeraAudioViewController()
-                controller.user = User.getData(pin: String(deviceId))
-                controller.isOutgoing = false
-                controller.modalPresentationStyle = .overCurrentContext
-                if UIApplication.shared.visibleViewController is UIAlertController {
-                    let vc = UIApplication.shared.visibleViewController as! UIAlertController
-                    vc.dismiss(animated: true, completion: {
-                        if UIApplication.shared.visibleViewController?.navigationController != nil {
-                            UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
-                        } else {
-                            UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
-                        }
-                    })
-                    return
-                }
-                if UIApplication.shared.visibleViewController?.navigationController != nil {
-                    UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
-                } else {
-                    UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
-                }
-            } else if (state == Nexilis.VIDEO_CALL_INCOMING && message.split(separator: ",")[1] != "joining Ac.room on channel 0" && message.split(separator: ",")[1] != "joining Vc.room on channel 0") {
-                if Nexilis.callAPNActivated || APIS.checkAppStateisBackground() {
-                    return
-                }
-                let dataUser = User.getDataCanNil(pin: String(deviceId))
-                if dataUser == nil {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
-                        API.terminateCall(sParty: nil)
-                    })
-                    return
-                }
-                let videoController = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
-                videoController.fPin = String(deviceId)
-                videoController.isInisiator = false
-                let navigationController = CustomNavigationController(rootViewController: videoController)
-                navigationController.modalPresentationStyle = .fullScreen
-                if UIApplication.shared.visibleViewController is UIAlertController {
-                    let vc = UIApplication.shared.visibleViewController as! UIAlertController
-                    vc.dismiss(animated: true, completion: {
-                        if UIApplication.shared.visibleViewController?.navigationController != nil {
-                            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                        } else {
-                            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                        }
-                    })
-                    return
-                }
-                if UIApplication.shared.visibleViewController?.navigationController != nil {
-                    UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                } else {
-                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                }
+                API.terminateCall(sParty: callerId)
+                return
             }
+            // A push-originated call already has CallKit and its own answer flow.
+            guard !Nexilis.callAPNActivated, !APIS.checkAppStateisBackground() else {
+                NexilisCallDiagnostics.record("incoming.route.skip reason=push_or_background push=\(Nexilis.callAPNActivated) background=\(APIS.checkAppStateisBackground())")
+                return
+            }
+            guard let caller = User.getDataCanNil(pin: callerId) else {
+                NexilisCallDiagnostics.record("incoming.route.reject reason=caller_missing_local_db")
+                API.terminateCall(sParty: callerId)
+                return
+            }
+            NexilisCallDiagnostics.record("incoming.route.callkit")
+            CallManager.shared.reportSocketIncomingCall(callerId: callerId,
+                callerName: caller.fullName, isVideo: state == Nexilis.VIDEO_CALL_INCOMING)
+            // Never present a call controller here. CallKit's Answer action opens it.
         }
     }
     
     public func onStatusCall(state: Int, message: String) {
+        NexilisCallDiagnostics.record("sdk.status state=\(state)")
+        if state == Nexilis.AUDIO_CALL_END || state == Nexilis.VIDEO_CALL_END {
+            let callerId = message.components(separatedBy: ",").first ?? ""
+            DispatchQueue.main.async {
+                CallManager.shared.endSocketIncomingCall(callerId: callerId,
+                    isVideo: state == Nexilis.VIDEO_CALL_END)
+            }
+        }
         var dataCall: [AnyHashable : Any] = [:]
         dataCall["state"] = state
         dataCall["message"] = message
@@ -4141,7 +4326,7 @@ extension Nexilis: MessageDelegate {
         }
     }
     
-    static func viewFormCS(pin: String, channel: String, displayName: String, thumb: String, id: String) {
+    static func viewFormCS(pin: String, channel: String, displayName: String, thumb: String, id: String, details: [String: String] = [:]) {
         if User.getDataCanNil(pin: pin) == nil {
             Nexilis.addFriendSilent(fpin: pin)
             sleep(1)
@@ -4156,30 +4341,20 @@ extension Nexilis: MessageDelegate {
             } else if Nexilis.onGoingPushCC["l_pin"] == pin {
                 return
             }
-            let alert = LibAlertController(title: "", message: "\n\n\n\n\n\n\n\n\n\n".localized(), preferredStyle: .alert)
-            let newWidth = UIScreen.main.bounds.width * 0.90 - 270
-            // update width constraint value for main view
-            if let viewWidthConstraint = alert.view.constraints.filter({ return $0.firstAttribute == .width }).first{
-                viewWidthConstraint.constant = newWidth
-            }
-            // update width constraint value for container view
-            if let containerViewWidthConstraint = alert.view.subviews.first?.constraints.filter({ return $0.firstAttribute == .width }).first {
-                containerViewWidthConstraint.constant = newWidth
-            }
-            let titleFont = [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 18), NSAttributedString.Key.foregroundColor: UIColor.black]
-            let titleAttrString = NSMutableAttributedString(string: "Call Center".localized(), attributes: titleFont)
-            alert.setValue(titleAttrString, forKey: "attributedTitle")
-            alert.view.subviews.first?.subviews.first?.subviews.first?.backgroundColor = .lightGray
-            alert.view.tintColor = .black
-            let rejectAction = UIAlertAction(title: "Pass to other representative".localized(), style: .destructive, handler: {(_) in
+            let alert = ContactCenterOfficerRequestDialog()
+            alert.displayName = displayName
+            alert.channel = channel
+            alert.metadata = details
+            alert.modalPresentationStyle = .overFullScreen
+            alert.modalTransitionStyle = .crossDissolve
+            let rejectAction: () -> Void = {
                 APIS.isHasFormCS = false
                 DispatchQueue.global().async {
                     _ = Nexilis.write(message: CoreMessage_TMessageBank.timeOutRequestCallCenter(channel: channel, l_pin: pin))
                 }
                 Nexilis.onGoingPushCC.removeAll()
-                alert.dismiss(animated: true, completion: nil)
-            })
-            let acceptAction = UIAlertAction(title: "I'll handle the customer".localized(), style: .default, handler: {(_) in
+            }
+            let acceptAction: () -> Void = {
                 APIS.isHasFormCS = false
                 // Fix: the microphone was only insisted on for a voice channel. A video
                 // channel was accepted with the microphone refused, which is a call nobody can
@@ -4287,6 +4462,7 @@ extension Nexilis: MessageDelegate {
                                     editorPersonalVC.complaintId = complaintId
                                     editorPersonalVC.channelContactCenter = channel
                                     editorPersonalVC.fPinContacCenter = pin
+                                    editorPersonalVC.officerRequestMetadata = details
                                     let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
                                     navigationController.modalPresentationStyle = .fullScreen
                                     navigationController.navigationBar.tintColor = .white
@@ -4340,111 +4516,10 @@ extension Nexilis: MessageDelegate {
                         print("RESPONSE NIL")
                     }
                 }
-            })
-            alert.addAction(acceptAction)
-            alert.addAction(rejectAction)
-            
-            let containerView = UIView(frame: CGRect(x: 20, y: 60, width: alert.view.bounds.size.width * 0.9 - 40, height: 150))
-            alert.view.addSubview(containerView)
-            containerView.layer.cornerRadius = 10.0
-            containerView.clipsToBounds = true
-            containerView.backgroundColor = .secondaryColor.withAlphaComponent(0.5)
-            
-            let imageProfile = UIImageView()
-            containerView.addSubview(imageProfile)
-            imageProfile.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                imageProfile.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10),
-                imageProfile.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10),
-                imageProfile.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 10),
-                imageProfile.widthAnchor.constraint(equalToConstant: 100)
-            ])
-            imageProfile.layer.cornerRadius = 10.0
-            imageProfile.clipsToBounds = true
-            imageProfile.backgroundColor = .lightGray.withAlphaComponent(0.3)
-            imageProfile.tintColor = .secondaryColor
-            imageProfile.image = UIImage(systemName: "person")
-            if thumb != "" {
-                imageProfile.setImage(name: thumb)
-                imageProfile.contentMode = .scaleAspectFill
             }
-            
-            let labelName = UILabel()
-            containerView.addSubview(labelName)
-            labelName.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                labelName.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 15),
-                labelName.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-            ])
-            labelName.font = UIFont.systemFont(ofSize: 12)
-            labelName.text = "Name".localized()
-            labelName.textColor = .mainColor
-            
-            let valueName = UILabel()
-            containerView.addSubview(valueName)
-            valueName.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                valueName.topAnchor.constraint(equalTo: labelName.bottomAnchor),
-                valueName.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-            ])
-            valueName.font = UIFont.systemFont(ofSize: 12)
-            valueName.text = displayName
-            valueName.textColor = .mainColor
-            
-            let labelType = UILabel()
-            containerView.addSubview(labelType)
-            labelType.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                labelType.topAnchor.constraint(equalTo: valueName.bottomAnchor, constant: 5),
-                labelType.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-            ])
-            labelType.font = UIFont.systemFont(ofSize: 12)
-            labelType.text = "Request Type".localized()
-            labelType.textColor = .mainColor
-            
-            let valueType = UILabel()
-            containerView.addSubview(valueType)
-            valueType.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                valueType.topAnchor.constraint(equalTo: labelType.bottomAnchor),
-                valueType.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-            ])
-            valueType.font = UIFont.systemFont(ofSize: 12)
-            if channel == "0" {
-                valueType.text = "Chat".localized()
-            } else if channel == "1" {
-                valueType.text = "Audio Call".localized()
-            } else if channel == "2" {
-                valueType.text = "Video Call".localized()
-            } else {
-                valueType.text = "Email".localized()
-            }
-            valueType.textColor = .mainColor
-            
-            let labelIdentity = UILabel()
-            containerView.addSubview(labelIdentity)
-            labelIdentity.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                labelIdentity.topAnchor.constraint(equalTo: valueType.bottomAnchor, constant: 5),
-                labelIdentity.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-            ])
-            labelIdentity.font = UIFont.systemFont(ofSize: 12)
-            labelIdentity.text = "Complaint ID".localized()
-            labelIdentity.textColor = .mainColor
-            
-            let valueIdentity = UILabel()
-            containerView.addSubview(valueIdentity)
-            valueIdentity.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                valueIdentity.topAnchor.constraint(equalTo: labelIdentity.bottomAnchor),
-                valueIdentity.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5),
-                valueIdentity.trailingAnchor.constraint(equalTo: containerView.trailingAnchor)
-            ])
-            valueIdentity.font = UIFont.systemFont(ofSize: 12)
-            valueIdentity.text = id
-            valueIdentity.numberOfLines = 0
-            valueIdentity.textColor = .mainColor
-            
+            alert.onHandle = acceptAction
+            alert.onPass = rejectAction
+
             var isShowAlert: Int?
             let canShow = UIApplication.shared.visibleViewController
             if canShow != nil && !(canShow is UINavigationController) {
@@ -4465,7 +4540,7 @@ extension Nexilis: MessageDelegate {
                     isShowAlert = 0
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(isShowAlert!), execute: {
+            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(isShowAlert ?? 0), execute: {
                 if UIApplication.shared.visibleViewController?.navigationController != nil {
                     UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
                 } else {
@@ -4827,11 +4902,16 @@ extension Nexilis: MessageDelegate {
     }
     
     public func onReceive(message: TMessage) {
+        DispatchQueue.main.async { ContactCenterSession.shared.receive(message) }
         var dataMessage: [AnyHashable : Any] = [:]
         dataMessage["message"] = message
         NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil, userInfo: dataMessage)
         if message.getCode() == CoreMessage_TMessageCode.PUSH_CALL_CENTER {
-            Nexilis.viewFormCS(pin: message.getBody(key: CoreMessage_TMessageKey.L_PIN), channel: message.getBody(key: CoreMessage_TMessageKey.CHANNEL), displayName: message.getBody(key: CoreMessage_TMessageKey.F_DISPLAY_NAME), thumb: message.getBody(key: CoreMessage_TMessageKey.THUMB_ID), id: message.getBody(key: CoreMessage_TMessageKey.DATA))
+            var details: [String: String] = [:]
+            for key in ContactCenterOfficerRequestDetails.keys {
+                details[key] = message.getBody(key: key, default_value: "")
+            }
+            Nexilis.viewFormCS(pin: message.getBody(key: CoreMessage_TMessageKey.L_PIN), channel: message.getBody(key: CoreMessage_TMessageKey.CHANNEL), displayName: message.getBody(key: CoreMessage_TMessageKey.F_DISPLAY_NAME), thumb: message.getBody(key: CoreMessage_TMessageKey.THUMB_ID), id: message.getBody(key: CoreMessage_TMessageKey.DATA), details: details)
         } else if message.getCode() == CoreMessage_TMessageCode.ACCEPT_CALL_CENTER {
             let fPinContacCenter = message.getBody(key: CoreMessage_TMessageKey.F_PIN)
             let requester = message.getBody(key: CoreMessage_TMessageKey.UPLINE_PIN)
@@ -4918,6 +4998,9 @@ extension Nexilis: MessageDelegate {
                 var threadIdentifier = sender
                 let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
                 if !onGoingCC.isEmpty {
+                    DispatchQueue.main.async {
+                        ContactCenterSession.shared.notifyChat(message, preview: text)
+                    }
                     return
                 }
 //                if Utils.inTabChats{
@@ -5480,6 +5563,93 @@ final class PinnedURLSessionNexilisDelegate: NSObject,
 /// Everything about how one is shown lives here - the queue, the look, the sound, and what
 /// happens when several arrive at once - so the three places that raise one (a message, a friend
 /// request, someone adding you back) all behave the same way.
+/// The window every top banner is shown in, above the strips that float over the app.
+///
+/// Fix: the banner library puts its banner on the app's own window and raises that window to
+/// `.statusBar + 1` - the very level the call/Contact Center strip and the other floating windows
+/// sit at. Between two windows at one level the one shown last wins, so a strip already on screen
+/// covered the notification ("Your Call Center request was accepted", a message from the
+/// officer). The banner is lifted, the moment it appears, into a window of its own one level
+/// above them, and the app's window goes back down to where it was.
+final class NotificationBannerOverlay {
+
+    static let shared = NotificationBannerOverlay()
+
+    static let level = UIWindow.Level.statusBar + 2
+
+    private var window: UIWindow?
+    private var started = false
+
+    private init() {}
+
+    func start() {
+        guard !started else { return }
+        started = true
+        NotificationCenter.default.addObserver(self, selector: #selector(bannerWillAppear(_:)),
+                                               name: BaseNotificationBanner.BannerWillAppear, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(bannerDidDisappear(_:)),
+                                               name: BaseNotificationBanner.BannerDidDisappear, object: nil)
+    }
+
+    @objc private func bannerWillAppear(_ notification: Notification) {
+        // Only one put straight on a window; a banner shown inside a screen stays in that screen.
+        guard let banner = notification.object as? BaseNotificationBanner,
+              let appWindow = banner.superview as? UIWindow, appWindow !== window,
+              let scene = appWindow.windowScene, let host = overlay(in: scene) else {
+            return
+        }
+        let frame = banner.frame
+        host.addSubview(banner)
+        banner.frame = frame
+        if appWindow.windowLevel == .statusBar + 1 {
+            appWindow.windowLevel = .normal
+        }
+    }
+
+    @objc private func bannerDidDisappear(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window,
+                  window.rootViewController?.view.subviews.contains(where: { $0 is BaseNotificationBanner }) != true else {
+                return
+            }
+            window.isHidden = true
+            self.window = nil
+        }
+    }
+
+    private func overlay(in scene: UIWindowScene) -> UIView? {
+        if let window, window.windowScene === scene, let view = window.rootViewController?.view {
+            return view
+        }
+        let host = UIViewController()
+        host.view.backgroundColor = .clear
+        let window = NotificationBannerOverlayWindow(windowScene: scene)
+        window.backgroundColor = .clear
+        window.windowLevel = NotificationBannerOverlay.level
+        window.rootViewController = host
+        window.isHidden = false
+        self.window = window
+        return host.view
+    }
+}
+
+/// Touches outside the banner go to whatever is underneath, and the window never takes the key:
+/// tapping a banner opens a conversation from whichever screen is on top, and a key window here
+/// would make this empty one the answer - see AudioMiniPlayerWindow.
+final class NotificationBannerOverlayWindow: UIWindow {
+
+    override var canBecomeKey: Bool {
+        return false
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let hit = super.hitTest(point, with: event) else {
+            return nil
+        }
+        return hit === self || hit === rootViewController?.view ? nil : hit
+    }
+}
+
 final class InAppBanner {
 
     static let shared = InAppBanner()
@@ -5549,6 +5719,7 @@ final class InAppBanner {
             selector: #selector(onBannerDidDisappear(_:)),
             name: BaseNotificationBanner.BannerDidDisappear,
             object: nil)
+        NotificationBannerOverlay.shared.start()
     }
 
     // MARK: - Raising one
@@ -5859,6 +6030,15 @@ final class InAppBanner {
     /// The chat screens keep this in two keys as they come and go - see
     /// registerAsOpenConversation in EditorPersonal and EditorGroup.
     private func isConversationOpen(_ conversationId: String) -> Bool {
+        if conversationId.hasPrefix("cc-status:") {
+            return ContactCenterSession.shared.shouldHideStatus(String(conversationId.dropFirst(10)))
+        }
+        if conversationId.hasPrefix("cc:") {
+            let ticket = String(conversationId.dropFirst(3))
+            // Queued cards for ended/replaced rooms must not resurface.
+            return ContactCenterSession.shared.context?.ticket != ticket ||
+                ContactCenterSession.shared.isEditorVisible(ticket: ticket)
+        }
         guard !conversationId.isEmpty else {
             return false
         }

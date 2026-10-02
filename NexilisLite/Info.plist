@@ -72,13 +72,11 @@
     </array>
 	<key>UIAppFonts</key>
 	<array>
-		<string>fonts/Poppins-Light.ttf</string>
-		<string>fonts/Poppins-LightItalic.ttf</string>
-		<string>fonts/Poppins-Medium.ttf</string>
-		<string>fonts/Poppins-MediumItalic.ttf</string>
-		<string>fonts/Poppins-Regular.ttf</string>
-		<string>fonts/Poppins-SemiBold.ttf</string>
-		<string>fonts/Poppins-SemiBoldItalic.ttf</string>
+		<string>fonts/Poppins-Regular.otf</string>
+		<string>fonts/Poppins-Italic.otf</string>
+		<string>fonts/Poppins-Medium.otf</string>
+		<string>fonts/Poppins-SemiBold.otf</string>
+		<string>fonts/Poppins-SemiBoldItalic.otf</string>
 	</array>
     <key>UIRequiredDeviceCapabilities</key>
 	<array>

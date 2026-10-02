@@ -29,7 +29,7 @@ public class ChangeNamePassswordViewController: UIViewController {
         if !fromSetting {
             let attributes = [NSAttributedString.Key.font: UIFont.boldSystemFont(ofSize: 16.0), NSAttributedString.Key.foregroundColor: UIColor.white]
             self.navigationController?.navigationBar.titleTextAttributes = attributes
-            navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(didTapExit(sender:)))
+            navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(didTapExit(sender:)))
         }
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Save".localized(), style: .plain, target: self, action: #selector(didTapSave(sender:)))
         

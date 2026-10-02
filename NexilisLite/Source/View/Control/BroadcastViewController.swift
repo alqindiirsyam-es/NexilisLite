@@ -116,8 +116,7 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
         UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
         let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
         navigationController?.navigationBar.titleTextAttributes = textAttributes
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(didTapCancel))
-        navigationItem.leftBarButtonItem?.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white], for: .normal)
+        navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(didTapCancel), wordColour: .white)
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Submit".localized(), style: .plain,target: self, action: #selector(submitBroadcast))
         navigationItem.rightBarButtonItem?.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white], for: .normal)
         

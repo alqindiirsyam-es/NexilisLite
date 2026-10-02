@@ -41,6 +41,35 @@ class TFAPasswordVC: UIViewController {
     private var isPasswordVisible = false
     var isFromSU = false
     var countRetry = 0
+    private var biometricStarted = false
+    private var biometricPending = false
+    private var biometricPassed = false
+    private var biometricFailureCount = 0
+
+    private func showBiometricFailure() {
+        let hsa = Utils.isHSAMode()
+        if hsa {
+            biometricFailureCount += 1
+            if biometricFailureCount >= 3 { exit(0) }
+        }
+        let dialog = DialogErrorMFA()
+        dialog.errorDesc = "Biometrik gagal atau dibatalkan."
+        dialog.method = METHOD
+        dialog.modalTransitionStyle = .crossDissolve
+        dialog.modalPresentationStyle = .overCurrentContext
+        if hsa { dialog.countRetry = biometricFailureCount }
+        else {
+            dialog.contentMessage = "Coba lagi atau gunakan password untuk melanjutkan."
+            dialog.secondaryActionTitle = "Gunakan Password"
+            dialog.onSecondaryAction = { [weak self] in self?.passwordTextField.becomeFirstResponder() }
+        }
+        dialog.isDismiss = { [weak self] result in
+            if result == 0 { exit(0) }
+            self?.biometricStarted = false
+            self?.beginBiometricFirst()
+        }
+        present(dialog, animated: true)
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -55,9 +84,45 @@ class TFAPasswordVC: UIViewController {
         setupLayout()
         loadData()
         updateUIBasedOnMethod()
-        DispatchQueue.global().async {
-            if Utils.isMiddleMode() && Utils.getBiometricState() != nil {
-                self.biometricAuth()
+        passwordTextField.isEnabled = !(Utils.isHSAMode() || (Utils.isMiddleMode() && Utils.getBiometricState() != nil))
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        beginBiometricFirst()
+    }
+
+    private func beginBiometricFirst() {
+        guard !biometricStarted, !biometricPending else { return }
+        biometricStarted = true
+        let hsa = Utils.isHSAMode()
+        guard hsa || (Utils.isMiddleMode() && Utils.getBiometricState() != nil) else {
+            passwordTextField.isEnabled = true
+            return
+        }
+        biometricPending = true
+        passwordTextField.isEnabled = false
+        navigationItem.rightBarButtonItem?.isEnabled = false
+        SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
+        MasterKeyUtil.shared.invalidateAuthentication()
+        Utils.authenticateWithBiometrics(verifySavedState: !hsa) { [weak self] ok, _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.biometricPending = false
+                self.biometricPassed = ok
+                if ok { self.biometricFailureCount = 0 }
+                self.navigationItem.rightBarButtonItem?.isEnabled = true
+                if hsa {
+                    self.passwordTextField.isEnabled = ok
+                    if !ok {
+                        self.showBiometricFailure()
+                    }
+                } else if ok {
+                    self.submit(fromBiometric: true)
+                } else {
+                    self.passwordTextField.isEnabled = true
+                    self.showBiometricFailure()
+                }
             }
         }
     }
@@ -284,6 +349,11 @@ class TFAPasswordVC: UIViewController {
     }
 
     @objc private func submitAction() {
+        guard !biometricPending else { return }
+        if Utils.isHSAMode() && !biometricPassed {
+            beginBiometricFirst()
+            return
+        }
         guard let password = passwordTextField.text, !password.trimmingCharacters(in: .whitespaces).isEmpty else {
             self.view.makeToast("Password cannot be empty.".localized(), duration: 2.0, position: .center)
             return
@@ -384,7 +454,7 @@ class TFAPasswordVC: UIViewController {
                         tMessage.mBodies[CoreMessage_TMessageKey.TOTP] = otp
                         if let response = Nexilis.writeAndWait(message: tMessage) {
                             if response.isOk() {
-                                if Utils.isMiddleMode() && Utils.getBiometricState() == nil {
+                                if Utils.isMiddleMode() {
                                     SecureUserDefaults.shared.set(Date(), forKey: "lastAuthenticationTime")
                                 }
                                 Nexilis.setInitCallback() { res in
@@ -459,51 +529,6 @@ class TFAPasswordVC: UIViewController {
         }
     }
 
-    private func biometricAuth() {
-        let semaphore = DispatchSemaphore(value: 0)
-        var result = true
-        var stateErr = 0
-        let manager = BiometricStateManager()
-        manager.hasBiometricStateChanged { (res, state) in
-            result = res
-            stateErr = state
-            semaphore.signal()
-        }
-        
-        semaphore.wait()
-
-        if result {
-            if Utils.isMiddleMode() {
-                DispatchQueue.main.async {
-                    self.submit(fromBiometric: true)
-                }
-            }
-        } else if stateErr == 1 {
-            DispatchQueue.main.async {
-                Nexilis.hideLoader {
-                    self.countRetry+=1
-                    if self.countRetry == 3 {
-                        exit(0)
-                    }
-                    let errorMessage = "Terjadi Perubahan Biometric (Touch/Face ID)"
-                    let dialog = DialogErrorMFA()
-                    dialog.modalTransitionStyle = .crossDissolve
-                    dialog.modalPresentationStyle = .overCurrentContext
-                    dialog.errorDesc = errorMessage
-                    dialog.method = self.METHOD
-                    dialog.countRetry = self.countRetry
-                    dialog.isDismiss = { res in
-                        if res == 0 {
-                            exit(0)
-                        }
-                    }
-                    dialog.hideTryAgain = (stateErr == 1)
-                    UIApplication.shared.visibleViewController?.present(dialog, animated: true)
-                }
-            }
-        }
-    }
-    
     private func updateUIBasedOnMethod() {
         headerTitleLabel.text = METHOD
     }

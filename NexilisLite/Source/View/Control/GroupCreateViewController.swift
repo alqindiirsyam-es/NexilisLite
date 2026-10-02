@@ -29,7 +29,7 @@ class GroupCreateViewController: UITableViewController, UITextFieldDelegate {
         navigationController?.navigationBar.standardAppearance = navBarAppearance
         navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
 
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancel(sender:)))
+        navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(cancel(sender:)))
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Save".localized(), style: .done, target: self, action: #selector(save(sender:)))
         navigationItem.rightBarButtonItem?.isEnabled = false
         name.placeholder = "Title".localized() + "*"

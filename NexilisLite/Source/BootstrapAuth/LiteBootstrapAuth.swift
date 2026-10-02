@@ -88,6 +88,27 @@ public enum LiteBootstrapAuth {
     }
     private(set) static var pendingContinuation: Continuation?
 
+    /// The server answers post-registration with this install's buddies and groups, and those rows are
+    /// written by the incoming thread - so the encrypted database has to be open before it is asked for,
+    /// or the answer arrives with nowhere to go. The database opens as part of the session start (feature
+    /// access hands over the secure-folder key); this waits for that, up to a bounded time.
+    private static func sendPostRegistration(connectionID: String, attempt: Int = 0) {
+        guard !connectionID.isEmpty else { return }
+        guard Database.shared.isReady else {
+            guard attempt < 30 else {
+                NXLogger.general.publicError("[BootstrapAuth] database belum terbuka - post-registration dilewati")
+                return
+            }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.5) {
+                sendPostRegistration(connectionID: connectionID, attempt: attempt + 1)
+            }
+            return
+        }
+        NXLogger.general.publicInfo("[BootstrapAuth] post-registration dikirim (install baru, database siap)")
+        _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: connectionID))
+        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil, userInfo: nil)
+    }
+
     /// Runs the continuation once: post-registration on a first login, then the session connect.
     /// Returns false when there is none, and the caller shows Lite's own sign-in screens as before.
     static func continueAfterSignIn() -> Bool {
@@ -101,18 +122,24 @@ public enum LiteBootstrapAuth {
             NXLogger.general.publicError("[BootstrapAuth] koneksi sesi tidak dapat dibuka setelah sign-in pra-aset")
             return true
         }
-        if !next.returningUser {
-            // As ChangeDeviceViewController.successSubmit: a fresh local store, then the server told this
-            // device is the account's now.
+        if !next.returningUser, !Utils.isMiddleMode() {
+            // As SignUpSignIn / ChangeDeviceViewController: a first login starts from a fresh local store,
+            // which the post-registration below then fills again.
             NSObject().deleteAllRecordDatabase()
-            _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: next.connectionID))
-        } else if Utils.isMiddleMode() && Utils.getBiometricState() == nil {
+        } else if next.returningUser, Utils.isMiddleMode(), Utils.getBiometricState() == nil {
             SecureUserDefaults.shared.set(Date(), forKey: "lastAuthenticationTime")
         }
         Nexilis.setInitCallback { result in
             guard result == 1 else { return }
+            // Buddies and groups arrive in answer to post-registration, and Lite's own screens send it
+            // after a first sign-in only (SignUpSignIn, ChangeDeviceViewController) - a returning user
+            // already has them on the device. A pre-asset sign-in happens over HTTPS, so the socket this
+            // session opens has carried no sign-in of its own and nothing else asks for them.
+            if !next.returningUser {
+                sendPostRegistration(connectionID: next.connectionID)
+            }
             Nexilis.successSui?()
-            guard !next.returningUser, Nexilis.showFB else { return }
+            guard Nexilis.showFB else { return }
             DispatchQueue.main.async {
                 Nexilis.floatingButton?.removeFromSuperview()
                 FloatingButton.datePull = nil
@@ -133,6 +160,8 @@ struct LiteBootstrapIdentity {
     let returningUser: Bool
     let fPin: String
     let hsa: Bool
+    /// Mode 2. First install goes to the Middle form (SUAI02); a returning user to TFA, as at mode 1.
+    let middle: Bool
     /// The CLM connection id (`B10`): the one the session will use once the asset is open.
     let connectionID: String
 
@@ -141,7 +170,7 @@ struct LiteBootstrapIdentity {
         guard mode != .regular else { throw LiteBootstrapError("Autentikasi bootstrap hanya berlaku pada mode 1/2.") }
         let pin = User.getMyPin() ?? ""
         return LiteBootstrapIdentity(returningUser: Utils.getSetProfile() && !pin.isEmpty, fPin: pin, hsa: mode == .HSA,
-                                     connectionID: try connectionID())
+                                     middle: mode == .middle, connectionID: try connectionID())
     }
 
     /// Lite's `connection_id`, created exactly as Nexilis.justInit does on a first run (the last five characters of
@@ -217,21 +246,43 @@ struct LiteBootstrapReceipt {
 enum LiteBootstrapDeviceProof {
     static var hasDeviceKey: Bool { KeyManagerNexilis.hasGeneratedKey() }
 
-    static func add(to request: inout [String: Any], challenge: String?, hsa: Bool) throws {
+    /// Middle's initial username/password form enrolls FPR + PUK, as the legacy iOS form and
+    /// Android's first-key request do. SUAI02 verifies SIG against USER_CHALLENGE from the socket,
+    /// not the HTTPS challenge. Returning TFA still signs the HTTPS challenge through DF01.
+    static func add(to request: inout [String: Any], challenge: String?, hsa: Bool,
+                    middleEnrollment: Bool = false) throws {
         let fingerprint = HMACDeviceFingerprintNexilis.generate()
         request[LiteBootstrapKeys.fingerprint] = fingerprint
-        if KeyManagerNexilis.hasGeneratedKey() {
-            guard let challenge, !challenge.isEmpty else { throw LiteBootstrapError("Challenge FIDO tidak tersedia.") }
-            guard let key = KeyManagerNexilis.getPrivateKey(useBiometric: hsa),
-                  let signature = KeyManagerNexilis.sign(data: Data("\(challenge)!\(fingerprint)".utf8), privateKey: key) else {
+        let hadDeviceKey = KeyManagerNexilis.hasGeneratedKey()
+        // Which key signs this request decides whether the server can accept it at all: it refuses to
+        // replace a key it already holds for this account and fingerprint, so a key generated here when the
+        // server still has an older one can never verify.
+        NXLogger.general.publicInfo("[BootstrapAuth] bukti perangkat: kunci \(hadDeviceKey ? "lama dari Keychain" : "BARU dibuat"), PUK ikut dikirim: \(middleEnrollment || !hadDeviceKey)")
+        if !hadDeviceKey {
+            KeyManagerNexilis.generateKey()
+            KeyManagerNexilis.saveMarker()
+        }
+
+        guard let key = KeyManagerNexilis.getPrivateKey(useBiometric: hadDeviceKey && hsa) else {
+            throw LiteBootstrapError("Kunci perangkat tidak tersedia.")
+        }
+
+        if middleEnrollment {
+            // Preserve the Keychain key: SUAI02 refuses replacement of an enrolled device key.
+            // Enrollment is authenticated by the username/password and the ZTA install token.
+            request.removeValue(forKey: LiteBootstrapKeys.signature)
+            request.removeValue(forKey: "BOOTSTRAP_REQUEST_ID")
+        } else if let challenge, !challenge.isEmpty {
+            guard let signature = KeyManagerNexilis.sign(data: Data("\(challenge)!\(fingerprint)".utf8), privateKey: key) else {
                 throw LiteBootstrapError("Tanda tangan perangkat tidak tersedia.")
             }
             request[LiteBootstrapKeys.signature] = signature.base64EncodedString()
-        } else {
-            KeyManagerNexilis.generateKey()
-            KeyManagerNexilis.saveMarker()
-            guard let key = KeyManagerNexilis.getPrivateKey(useBiometric: false),
-                  let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: key) else {
+        } else if hadDeviceKey {
+            throw LiteBootstrapError("Challenge FIDO tidak tersedia.")
+        }
+
+        if middleEnrollment || !hadDeviceKey {
+            guard let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: key) else {
                 throw LiteBootstrapError("Kunci perangkat tidak dapat dibuat.")
             }
             request[LiteBootstrapKeys.publicKey] = publicKey
@@ -260,12 +311,21 @@ final class LiteBootstrapCoordinator {
             do {
                 let token = try await APISZTA.requestInstallToken()
                 let client = LiteBootstrapHTTPSClient(baseURL: LiteBootstrapAuth.baseURL, installToken: token)
-                let form: LiteBootstrapFormViewController = identity.returningUser
-                    ? LiteBootstrapTfaViewController(identity: identity, bindingID: keyID, client: client)
-                    : LiteBootstrapLoginViewController(identity: identity, bindingID: keyID, client: client)
+                // Mode 1 first install: Login, then the TFA stage. Mode 2 first install: the Middle form,
+                // which is sign-in and sign-up in one and answers with the assertion itself. Either mode,
+                // a returning user goes straight to TFA.
+                let form: LiteBootstrapFormViewController
+                if identity.returningUser {
+                    form = LiteBootstrapTfaViewController(identity: identity, bindingID: keyID, client: client)
+                } else if identity.middle {
+                    form = LiteBootstrapMiddleViewController(identity: identity, bindingID: keyID, client: client)
+                } else {
+                    form = LiteBootstrapLoginViewController(identity: identity, bindingID: keyID, client: client)
+                }
                 form.onFinish = { [weak self] result in self?.finish(result) }
                 present(form)
-                NXLogger.general.publicInfo("[BootstrapAuth] form \(identity.returningUser ? "TFA" : "Login") pra-aset ditampilkan")
+                let formName = identity.returningUser ? "TFA" : (identity.middle ? "Middle" : "Login")
+                NXLogger.general.publicInfo("[BootstrapAuth] form \(formName) pra-aset ditampilkan")
             } catch {
                 finish(.failure(error))
             }
@@ -317,4 +377,3 @@ public final class LiteBootstrapAuthBridge: NSObject {
         }
     }
 }
-

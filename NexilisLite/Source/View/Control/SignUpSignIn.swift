@@ -71,7 +71,7 @@ public class SignUpSignIn: UIViewController {
         }
         let controllers = self.navigationController?.viewControllers
         if forceLogin && !forceSignIn && (controllers!.count < 2 || !(controllers![controllers!.count - 2] is SignInOption)) {
-            navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(didTapCancel(sender:)))
+            navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(didTapCancel(sender:)))
         }
         self.navigationController?.navigationBar.topItem?.backButtonTitle = ""
     }
@@ -159,7 +159,7 @@ public class SignUpSignIn: UIViewController {
     }
     
     func showOTPSelectionAlert(_ viewController: UIViewController, _ number: String) {
-        let alert = UIAlertController(title: "Choose OTP Method".localized(),
+        let alert = LibAlertController(title: "Choose OTP Method".localized(),
                                       message: "Select how you want to receive your OTP".localized(),
                                       preferredStyle: .actionSheet) // use .alert if you want centered popup
         
@@ -411,7 +411,7 @@ public class SignUpSignIn: UIViewController {
         KeyManagerNexilis.deleteMarker()
         if isAlert {
             Nexilis.hideLoader(completion: {
-                let alert = UIAlertController(title: title,
+                let alert = LibAlertController(title: title,
                                               message: "Do you want to create new user with this password?".localized(),
                                               preferredStyle: .alert) // use .alert if you want centered popup
                 
@@ -496,7 +496,7 @@ public class SignUpSignIn: UIViewController {
         self.nameReg = name
         self.passReg = password
         if Utils.isMiddleMode() {
-            let alert = UIAlertController(title: "Touch/Face ID(Optional)".localized(),
+            let alert = LibAlertController(title: "Touch/Face ID(Optional)".localized(),
                                           message: "Do you want to use Touch/Face ID for next Sign-In?".localized(),
                                           preferredStyle: .alert) // use .alert if you want centered popup
             

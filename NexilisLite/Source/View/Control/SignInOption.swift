@@ -21,7 +21,7 @@ public class SignInOption: UIViewController {
             self.title = "Sign-Up/Sign-In Method".localized()
         }
         if forceLogin && !forceSignIn {
-            navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(didTapCancel(sender:)))
+            navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(didTapCancel(sender:)))
         }
         self.navigationController?.navigationBar.topItem?.backButtonTitle = ""
         createBody()

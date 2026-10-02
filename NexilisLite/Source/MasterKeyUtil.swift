@@ -204,6 +204,9 @@ public class MasterKeyUtil {
     }
     
     private let masterKeyQueue = DispatchQueue(label: "io.nexilis.masterKeyQueue")
+    // Serialise prompting reads separately. A successful biometric callback adopts its
+    // context on masterKeyQueue, so that queue must remain available while a prompt runs.
+    private let biometricReadQueue = DispatchQueue(label: "io.nexilis.biometricReadQueue")
 
     /// The authentication being reused across reads, and when it was established.
     ///
@@ -295,6 +298,10 @@ public class MasterKeyUtil {
             return try mediaKey()
         }
 
+        if LiteAuthenticationGate.applies {
+            try authenticateDeviceKeyReadIfNeeded(withoutBiometric: false)
+        }
+
         // Presenting biometry blocks until the person answers, and the main queue is where the
         // answer has to be drawn - so a prompting read from the main thread is an unresponsive
         // app and then a watchdog kill. It is never allowed to happen.
@@ -379,60 +386,11 @@ public class MasterKeyUtil {
     /// Neither is something these two modes can ship, which is the whole reason they exist. What
     /// guards the key here is the check below, and it still runs on every single call.
     private func deviceKeychainMasterKey(withoutBiometric: Bool) throws -> SymmetricKey {
+        try authenticateDeviceKeyReadIfNeeded(withoutBiometric: withoutBiometric)
         var retrievedKey: SymmetricKey?
         var thrownError: Error?
 
         masterKeyQueue.sync {
-            // `!withoutBiometric` first: it is the cheapest of the three by a long way, and the
-            // two after it are not - one reads enrollment state or parses the feature-access
-            // blob, the other asks the biometry subsystem what it can do. Same answer, in the
-            // order that stops early.
-            if !withoutBiometric && shouldPromptForBiometry() && isDeviceNotSecure() {
-                let semaphore = DispatchSemaphore(value: 0)
-                var result = false
-
-                Utils.authenticateWithBiometrics { success, errorMessage in
-                    if success {
-                        result = true
-                    } else {
-                        print("Access denied: \(errorMessage ?? "Unknown error")")
-                    }
-                    semaphore.signal()
-                }
-
-                semaphore.wait()
-
-                if !result {
-                    // The alert below is presented on the main queue and answered by tapping OK,
-                    // and the wait after it blocks until that happens. On the main thread those
-                    // two cannot both be true: the block can never run, the tap can never come,
-                    // and the app hangs for good. So on the main thread the failure is simply
-                    // raised - the caller still learns the key is unavailable, which is the point.
-                    //
-                    // Mode 3 reaches this only when the service's `authentication` flag is on and
-                    // the read is on the main thread - a combination that would already be
-                    // freezing today, so nothing that works now changes. Mode 2 reaches it far
-                    // more often, because there the prompt is driven by the person's own sign-up
-                    // enrollment rather than a server flag.
-                    if Thread.isMainThread {
-                        thrownError = NSError(domain: "KeychainError", code: -99, userInfo: [
-                            NSLocalizedDescriptionKey: "Identity could not be verified for this read."
-                        ])
-                        return
-                    }
-                    DispatchQueue.main.async {
-                        let alertController = UIAlertController(title: "Failed to Verify Identity".localized(), message: "Biometric authentication hasn't been set up/Biometric invalid.".localized(), preferredStyle: .alert)
-                        alertController.addAction(UIAlertAction(title: "OK", style: .default, handler: {(_) in
-                            semaphore.signal()
-                        }))
-                        UIApplication.shared.visibleViewController?.present(alertController, animated: true)
-                    }
-                    thrownError = NSError(domain: "KeychainError", code: -99, userInfo: nil)
-                    semaphore.wait()
-                    return
-                }
-            }
-
             if let already = deviceKeychainCachedKey {
                 retrievedKey = already
                 return
@@ -466,9 +424,56 @@ public class MasterKeyUtil {
         }
         return key
     }
+
+    /// Never hold the storage queue, or block the main thread, while waiting for biometry.
+    /// The callback writes the authentication timestamp and adopts the LAContext before
+    /// signalling completion. Keeping masterKeyQueue free lets both it and Group's UI
+    /// reads finish when the user switches segments immediately after authentication.
+    private func authenticateDeviceKeyReadIfNeeded(withoutBiometric: Bool) throws {
+        guard !withoutBiometric && shouldPromptForBiometry() && isDeviceNotSecure() else { return }
+        guard !Thread.isMainThread else {
+            throw NSError(domain: "KeychainError", code: -94, userInfo: [
+                NSLocalizedDescriptionKey: "Protected data needs authentication off the main thread."
+            ])
+        }
+
+        try biometricReadQueue.sync {
+            // Another background read may have completed authentication while this one
+            // waited. Recheck so simultaneous database/avatar reads share one prompt.
+            guard shouldPromptForBiometry() && isDeviceNotSecure() else { return }
+            let semaphore = DispatchSemaphore(value: 0)
+            var authenticated = false
+            var failureMessage: String?
+            if LiteAuthenticationGate.applies {
+                // Run the UI gate on main, wait here without holding masterKeyQueue.
+                // Success is released only after CPaaS accepted the signed challenge.
+                DispatchQueue.main.async {
+                    LiteAuthenticationGate.requireRecentAuthentication { success in
+                        authenticated = success
+                        failureMessage = success ? nil : "Server-backed authentication failed."
+                        semaphore.signal()
+                    }
+                }
+            } else {
+                Utils.authenticateWithBiometrics { success, message in
+                    authenticated = success
+                    failureMessage = message
+                    semaphore.signal()
+                }
+            }
+            semaphore.wait()
+            guard authenticated else {
+                // Return the failure directly: waiting for an alert's OK button can
+                // deadlock a UI read queued behind this operation as well.
+                throw NSError(domain: "KeychainError", code: -99, userInfo: [
+                    NSLocalizedDescriptionKey: failureMessage ?? "Identity could not be verified for this read."
+                ])
+            }
+        }
+    }
     
     private func showAlert(title: String, message: String) {
-        let alertController = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        let alertController = LibAlertController(title: title, message: message, preferredStyle: .alert)
         alertController.addAction(UIAlertAction(title: "OK", style: .default, handler: {(_) in
             if Database.shared.database == nil {
                 exit(979)
@@ -616,6 +621,7 @@ public class MasterKeyUtil {
     /// door. `.regular` keeps the behaviour this library has always had - the service's
     /// `authentication` feature flag decides, and by default nothing is asked.
     private func shouldPromptForBiometry() -> Bool {
+        if NXSecurityPolicy.bindsKeysToUserAuth() { return true }
         if NXSecurityPolicy.mode == .middle {
             return Utils.getBiometricState() != nil
         }
@@ -981,5 +987,3 @@ class BiometricStateManager {
         }
     }
 }
-
-

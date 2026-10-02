@@ -318,7 +318,7 @@ class QmeraAudioConference: UIViewController {
                         do {
                             _ = try Database.shared.insertRecord(fmdb: fmdb, table: "CALL_CENTER_HISTORY", cvalues: [
                                 "type" : "1",
-                                "title" : "Contact Center".localized(),
+                                "title" : "Call Center".localized(),
                                 "time" : startTimeCC,
                                 "f_pin" : officer,
                                 "data" : complaintId,
@@ -354,7 +354,7 @@ class QmeraAudioConference: UIViewController {
                         do {
                             _ = try Database.shared.insertRecord(fmdb: fmdb, table: "CALL_CENTER_HISTORY", cvalues: [
                                 "type" : "1",
-                                "title" : "Contact Center".localized(),
+                                "title" : "Call Center".localized(),
                                 "time" : startTimeCC,
                                 "f_pin" : officer,
                                 "data" : complaintId,

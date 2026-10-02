@@ -1261,7 +1261,7 @@ enum CertificatePinningHelper {
         let template = "You're about to access a website that is not currently trusted by your Nexilis Browser. This website's security certificate is not recognized.\n\nThe connection to <<domain>> has been blocked because its security certificate does not match the trusted pin.".localized()
         let messageText = template.replacingOccurrences(of: "<<domain>>", with: domain)
 
-        let alert = UIAlertController(title: "Warning Unknown Url!".localized(),
+        let alert = LibAlertController(title: "Warning Unknown Url!".localized(),
                                        message: messageText,
                                        preferredStyle: .alert)
 
@@ -1344,7 +1344,7 @@ enum CertificatePinningHelper {
         let template = "You're about to access a website that is not currently trusted by your Nexilis Browser.\n\nDo you wish to proceed to <<domain>>?\n\nNote: only continue if you recognize this address.".localized()
         let messageText = template.replacingOccurrences(of: "<<domain>>", with: domain)
 
-        let alert = UIAlertController(title: "Warning Unknown Url!".localized(),
+        let alert = LibAlertController(title: "Warning Unknown Url!".localized(),
                                        message: messageText,
                                        preferredStyle: .alert)
 

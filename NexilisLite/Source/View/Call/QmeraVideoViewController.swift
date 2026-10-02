@@ -25,7 +25,9 @@ class QmeraVideoViewController: UIViewController {
     static private var bSpeakerPhone: Bool! = false
     private var tempSpeaker = false
     private var timerSpeaker: Timer?
-    static private var isLoop = false
+    /// See AudioEngineWatch. Fix: the engine was restarted by a loop nothing stopped before the
+    /// call was ended, so a restart could run into the SDK tearing the same engine down.
+    static private let audioWatch = AudioEngineWatch(label: "io.nexilis.QmeraVideoViewController.audioWatch")
     
     
     var dataPerson: [[String: String?]] = []
@@ -44,19 +46,25 @@ class QmeraVideoViewController: UIViewController {
     ///   here. That last one has no presenting controller at all, which is why the caller's own
     ///   call could not be minimised: the check simply failed and the button did nothing.
     @objc func didMinimized(sender: Any?) {
+        minimizeForContactCenterChat()
+    }
+
+    func minimizeForContactCenterChat(completion: (() -> Void)? = nil) {
         let presented: UIViewController = navigationController ?? self
-        if presented.presentingViewController != nil {
+        if let presenter = presented.presentingViewController {
             isMinimizing = true
-            presented.dismiss(animated: true, completion: { [weak self] in
+            presenter.dismiss(animated: true, completion: { [weak self] in
                 // Moved only once the dismissal is over. Dismissing a view controller takes its
                 // view out of whatever superview it happens to be in - so putting it in the
                 // bubble first meant UIKit pulled it straight back out, leaving it empty.
                 MiniVideoCallManager.shared.show(for: self, container: presented)
                 self?.isMinimizing = false
+                completion?()
             })
             return
         }
         guard let navigation = navigationController, navigation.viewControllers.contains(self) else {
+            completion?()
             return
         }
         // Pushed: minimising is a pop, and this screen itself is what goes into the corner.
@@ -69,6 +77,7 @@ class QmeraVideoViewController: UIViewController {
         let finish = {
             MiniVideoCallManager.shared.show(for: call, container: call)
             call.isMinimizing = false
+            completion?()
         }
         if let coordinator = navigation.transitionCoordinator {
             coordinator.animate(alongsideTransition: nil, completion: { _ in
@@ -396,7 +405,10 @@ class QmeraVideoViewController: UIViewController {
     }
 
     override func viewDidLoad() {
+        ContactCenterSession.shared.register(video: self)
         super.viewDidLoad()
+        // A new call: its audio watch may run.
+        QmeraVideoViewController.audioWatch.arm()
         QmeraVideoViewController.volumeView = MPVolumeView(frame: .zero)
         QmeraVideoViewController.volumeView.isHidden = true
         Nexilis.setWhiteboardReceiver(receiver: self)
@@ -926,7 +938,7 @@ class QmeraVideoViewController: UIViewController {
                 }
                 Nexilis.stopRingtoneCall()
                 Nexilis.stopRingbacktoneCall()
-                QmeraVideoViewController.isLoop = false
+                QmeraVideoViewController.audioWatch.stop()
                 QmeraVideoViewController.bSpeakerPhone = false
                 do { try AVAudioSession.sharedInstance().setActive(false) } catch {}
                 Nexilis.callAPNActivated = false
@@ -988,7 +1000,7 @@ class QmeraVideoViewController: UIViewController {
                 self.wbTimer.invalidate()
                 self.vcTimer.invalidate()
 //                self.labelTimerVC.text = "Video call is over".localized()
-                QmeraVideoViewController.isLoop = false
+                QmeraVideoViewController.audioWatch.stop()
                 QmeraVideoViewController.bSpeakerPhone = false
                 do { try AVAudioSession.sharedInstance().setActive(false) } catch {}
                 Nexilis.callAPNActivated = false
@@ -1105,6 +1117,10 @@ class QmeraVideoViewController: UIViewController {
     }
     
     @objc func didTapChatButton(){
+        if !ticketId.isEmpty {
+            ContactCenterSession.shared.openChat(ticket: ticketId)
+            return
+        }
         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
         let members: String = SecureUserDefaults.shared.value(forKey: "membersCC") ?? ""
         let officer = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
@@ -1370,6 +1386,10 @@ class QmeraVideoViewController: UIViewController {
     }
     
     func endAllCall() {
+        if !ticketId.isEmpty, ContactCenterSession.shared.context?.ticket == ticketId {
+            ContactCenterSession.shared.end(ticket: ticketId, notifyServer: true)
+            return
+        }
         // Whatever route the call ended by, this is where the corner it may have been shrunk
         // into goes away with it.
         isMinimizing = false
@@ -1388,7 +1408,7 @@ class QmeraVideoViewController: UIViewController {
                     do {
                         _ = try Database.shared.insertRecord(fmdb: fmdb, table: "CALL_CENTER_HISTORY", cvalues: [
                             "type" : "2",
-                            "title" : "Contact Center".localized(),
+                            "title" : "Call Center".localized(),
                             "time" : startTimeCC,
                             "f_pin" : officer,
                             "data" : complaintId,
@@ -1417,7 +1437,7 @@ class QmeraVideoViewController: UIViewController {
                 SecureUserDefaults.shared.removeValue(forKey: "waitingRequestCC")
             }
         }
-        API.terminateCall(sParty: nil)
+        QmeraVideoViewController.audioWatch.stop { API.terminateCall(sParty: nil) }
         if APIS.uuidCall != nil {
             CallManager.shared.endCall(uuid: APIS.uuidCall!) {
                 APIS.uuidCall = nil
@@ -1655,13 +1675,12 @@ class QmeraVideoViewController: UIViewController {
             DispatchQueue.main.async {
                 self.buttonSpeaker.isEnabled = false
             }
-            QmeraVideoViewController.isLoop = true
+            QmeraVideoViewController.audioWatch.start()
             DispatchQueue.global(qos: .userInitiated).async {
                 var countLoop = 0
                 repeat {
                     Thread.sleep(forTimeInterval : 0.5)
-                    if (QmeraVideoViewController.isLoop && !API.bAudioEngineIsRunning()) {
-                        API.restartAudioEngine()
+                    if QmeraVideoViewController.audioWatch.restartIfNeeded() {
                         DispatchQueue.main.async {
                             if !self.buttonSpeaker.isEnabled{
                                 self.setSpeaker()
@@ -1685,7 +1704,7 @@ class QmeraVideoViewController: UIViewController {
                             }
                         }
                     }
-                } while (QmeraVideoViewController.isLoop)
+                } while (QmeraVideoViewController.audioWatch.isRunning)
             }
         }
         else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
@@ -1920,7 +1939,7 @@ class QmeraVideoViewController: UIViewController {
                         self.wbTimer.invalidate()
                         _ = Nexilis.getWhiteboardDelegate()?.terminate()
                     }
-                    QmeraVideoViewController.isLoop = false
+                    QmeraVideoViewController.audioWatch.stop()
                     QmeraVideoViewController.bSpeakerPhone = false
                     do { try AVAudioSession.sharedInstance().setActive(false) } catch {}
                     Nexilis.callAPNActivated = false
@@ -1975,7 +1994,7 @@ class QmeraVideoViewController: UIViewController {
                     if controller != nil {
                         controller!.dismiss(animated: true)
                     }
-                    QmeraVideoViewController.isLoop = false
+                    QmeraVideoViewController.audioWatch.stop()
                     QmeraVideoViewController.bSpeakerPhone = false
                     do { try AVAudioSession.sharedInstance().setActive(false) } catch {}
                     Nexilis.callAPNActivated = false

@@ -82,7 +82,7 @@ class ContactCallViewController: UIViewController {
             navBarAppearance.titleTextAttributes = attributes
             navigationController?.navigationBar.standardAppearance = navBarAppearance
             navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
-            let cancel = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(didTapCancel(sender:)))
+            let cancel = UIBarButtonItem.libCancel(target: self, action: #selector(didTapCancel(sender:)))
             navigationItem.leftBarButtonItem = cancel
         }
         let buttonAddFriend = UIBarButtonItem(image: UIImage(systemName: "person.badge.plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular, scale: .default))?.withTintColor(.white), style: .plain, target: self, action: #selector(addFriend(sender:)))

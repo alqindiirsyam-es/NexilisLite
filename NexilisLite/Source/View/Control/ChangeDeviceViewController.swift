@@ -165,7 +165,7 @@ public class ChangeDeviceViewController: UIViewController {
     }
     
     func showOTPSelectionAlert(_ viewController: UIViewController, _ number: String) {
-        let alert = UIAlertController(title: "Choose OTP Method".localized(),
+        let alert = LibAlertController(title: "Choose OTP Method".localized(),
                                       message: "Select how you want to receive your OTP".localized(),
                                       preferredStyle: .actionSheet) // use .alert if you want centered popup
         

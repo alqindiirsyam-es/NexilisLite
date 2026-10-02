@@ -52,6 +52,8 @@ class ContactChatViewController: UITableViewController {
     // plain text search. The chips sit under the segmented control and the results cover the
     // table while a filter is on. All of it belongs to the component; see ChatTagSearch.
     private let tagSearch = ChatTagSearch()
+    /// What a search with words and no filter shows over the Chats segment - see ChatGlobalSearch.
+    private let globalSearch = ChatGlobalSearch()
     private var tagSearchHeader: UIStackView!
     
     var segment: UISegmentedControl!
@@ -139,7 +141,14 @@ class ContactChatViewController: UITableViewController {
             guard let self = self else { return }
             // While a filter is on the component draws the results; the table underneath is
             // left alone so it is still there when the filter is turned off again.
-            self.tableView.isScrollEnabled = !self.tagSearch.isShowingResults
+            self.tableView.isScrollEnabled = !self.tagSearch.isShowingResults && !self.globalSearch.isShowingResults
+            // A filter takes the place of the search across everything; with none on, the words
+            // in the field are searched again.
+            if tag != 0 {
+                self.globalSearch.clear()
+            } else {
+                self.filterContentForSearchText((self.searchController.searchBar.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
+            }
             // The results are drawn on a transparent background, so this list has to stop
             // drawing rows of its own underneath them.
             self.tableView.reloadData()
@@ -163,7 +172,12 @@ class ContactChatViewController: UITableViewController {
         NSLayoutConstraint.activate([
             tagSearchHeader.leadingAnchor.constraint(equalTo: tableView.frameLayoutGuide.leadingAnchor),
             tagSearchHeader.trailingAnchor.constraint(equalTo: tableView.frameLayoutGuide.trailingAnchor),
-            tagSearchHeader.topAnchor.constraint(equalTo: tableView.frameLayoutGuide.topAnchor)
+            // The safe area, not the frame: this table extends under the navigation bar, and the bar is
+            // taller once the search field is part of it - which is the state the screen comes back to
+            // after a chat has been pushed and popped. Pinned to the frame, the segmented control then sat
+            // behind the bar and the screen came back with the segments gone, leaving the gap their inset
+            // still reserved. The safe area already accounts for the bar, whatever height it is.
+            tagSearchHeader.topAnchor.constraint(equalTo: tableView.safeAreaLayoutGuide.topAnchor)
         ])
 
         tableView.addSubview(tagSearch.resultsView)
@@ -177,6 +191,26 @@ class ContactChatViewController: UITableViewController {
         // Transparent so the screen's own background carries on behind the filter results,
         // instead of a flat panel dropping over it whenever a filter is picked.
         tagSearch.resultsView.backgroundColor = .clear
+
+        // The search across everything is laid over this list in the same place, and opens what
+        // is tapped the way a filter result is opened.
+        tableView.addSubview(globalSearch.resultsView)
+        globalSearch.resultsView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            globalSearch.resultsView.leadingAnchor.constraint(equalTo: tableView.frameLayoutGuide.leadingAnchor),
+            globalSearch.resultsView.trailingAnchor.constraint(equalTo: tableView.frameLayoutGuide.trailingAnchor),
+            globalSearch.resultsView.topAnchor.constraint(equalTo: tagSearchHeader.bottomAnchor),
+            globalSearch.resultsView.bottomAnchor.constraint(equalTo: tableView.frameLayoutGuide.bottomAnchor)
+        ])
+        globalSearch.onSelect = { [weak self] chat in
+            guard let self = self else { return }
+            self.chatTagSearch(self.tagSearch, didSelect: chat)
+        }
+        globalSearch.onVisibilityChanged = { [weak self] _ in
+            guard let self = self else { return }
+            self.tableView.isScrollEnabled = !self.tagSearch.isShowingResults && !self.globalSearch.isShowingResults
+            self.tableView.reloadData()
+        }
 
         tableView.tableHeaderView = nil
         updateTagSearchAvailability()
@@ -236,6 +270,7 @@ class ContactChatViewController: UITableViewController {
             // text search below must not overwrite them.
             tagSearch.setSearchText(searchText)
             if tagSearch.selectedTag != 0 {
+                globalSearch.clear()
                 return
             }
         }
@@ -247,6 +282,15 @@ class ContactChatViewController: UITableViewController {
             Utils.inTabChats = false
             fillteredData = self.groups.filter { $0.name.lowercased().contains(searchText.lowercased()) }
         }
+        // The Chats segment answers words with the search across everything - chats, contacts,
+        // starred and messages - laid over this list. Forwarding keeps its list of names.
+        if !searchText.isEmpty, isChooser == nil, segment.numberOfSegments == 3, segment.selectedSegmentIndex == 0 {
+            fillteredData = []
+            globalSearch.search(searchText)
+            tableView.reloadData()
+            return
+        }
+        globalSearch.clear()
         if !searchText.isEmpty {
             if segment.numberOfSegments == 3 {
                 switch segment.selectedSegmentIndex {
@@ -297,7 +341,7 @@ class ContactChatViewController: UITableViewController {
         
         //        navigationController?.navigationBar.prefersLargeTitles = true
         
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancel(sender:)))
+        navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(cancel(sender:)))
         
         let childrenMenu : [UIAction] = [
             UIAction(title: "Create Group".localized(), image: UIImage(systemName: "person.and.person"), handler: {[weak self](_) in
@@ -1593,7 +1637,7 @@ extension ContactChatViewController {
     override func numberOfSections(in tableView: UITableView) -> Int {
         // The filter's own results cover this list completely while they are up. They are
         // transparent, so anything drawn here would show straight through them.
-        if tagSearch.isShowingResults {
+        if tagSearch.isShowingResults || globalSearch.isShowingResults {
             return 0
         }
         if isFiltering {
@@ -1611,7 +1655,7 @@ extension ContactChatViewController {
     
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         var value = 0
-        if tagSearch.isShowingResults {
+        if tagSearch.isShowingResults || globalSearch.isShowingResults {
             return 0
         }
         if isFiltering {
@@ -1980,7 +2024,22 @@ extension ContactChatViewController {
         return fullname
     }
 
+    /// What the search field holds while it is filtering, for the results to be lit by.
+    private var highlightQuery: String {
+        return isFiltering ? (searchController.searchBar.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) : ""
+    }
+
+    /// Search results are lit by the rule the conversation uses - see ChatSearchMatch. Fix: the
+    /// list showed what it had found with nothing to say where in the row it was.
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = buildCell(tableView, cellForRowAt: indexPath)
+        if isFiltering {
+            ChatSearchMatch.highlight(cell, query: highlightQuery)
+        }
+        return cell
+    }
+
+    private func buildCell(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         var cell: UITableViewCell!
         switch segment.selectedSegmentIndex {
         case 0:
@@ -1997,7 +2056,7 @@ extension ContactChatViewController {
                 }
                 let rowSignature = [
                     "\(indexPath.section).\(indexPath.row)",
-                    "\(isFiltering)|\(noData)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)",
+                    "\(isFiltering)|\(noData)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)|\(highlightQuery)",
                     "\(traitCollection.userInterfaceStyle.rawValue)|\(String.offset())|\(Int(view.frame.width))",
                     CellBuildSignature.describe(contactForRow)
                 ].joined(separator: ";")
@@ -2082,7 +2141,7 @@ extension ContactChatViewController {
                 }
                 let rowSignature = [
                     "\(indexPath.section).\(indexPath.row)",
-                    "\(isFiltering)|\(noData)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)",
+                    "\(isFiltering)|\(noData)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)|\(highlightQuery)",
                     "\(traitCollection.userInterfaceStyle.rawValue)|\(String.offset())|\(Int(view.frame.width))",
                     CellBuildSignature.describe(chatForRow)
                 ].joined(separator: ";")
@@ -2227,6 +2286,7 @@ extension ContactChatViewController {
                 titleView.font = UIFont.systemFont(ofSize: 14 + String.offset(), weight: .medium)
                 
                 let timeView = UILabel()
+                timeView.tag = ChatSearchMatch.unlitTag
                 let viewCounter = UIView()
                 let viewPinned = ChatListPin.imageView()
                 // The "@" of a mention nobody has read yet. It only ever appears alongside a badge:
@@ -2256,6 +2316,7 @@ extension ContactChatViewController {
                     viewCounter.layer.borderColor = UIColor.secondaryColor.cgColor
 
                     let labelCounter = UILabel()
+                    labelCounter.tag = ChatSearchMatch.unlitTag
                     viewCounter.addSubview(labelCounter)
                     labelCounter.translatesAutoresizingMaskIntoConstraints = false
                     NSLayoutConstraint.activate([
@@ -2592,7 +2653,7 @@ extension ContactChatViewController {
                 }
                 let rowSignature = [
                     "\(indexPath.section).\(indexPath.row)",
-                    "\(isFiltering)|\(noData)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)",
+                    "\(isFiltering)|\(noData)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)|\(highlightQuery)",
                     "\(traitCollection.userInterfaceStyle.rawValue)|\(String.offset())|\(Int(view.frame.width))",
                     CellBuildSignature.describe(contactForRow)
                 ].joined(separator: ";")
@@ -2847,6 +2908,8 @@ extension ContactChatViewController: ChatTagSearchDelegate {
             // This is what takes the Editor to the message that was tapped instead of to the
             // bottom of the conversation.
             editorPersonalVC.referenceMessageId = chat.messageId
+            // Opened from the search across everything: its words stay lit in there.
+            editorPersonalVC.highlightQuery = globalSearch.currentQuery
             navigationController?.show(editorPersonalVC, sender: nil)
             return
         }
@@ -2855,6 +2918,7 @@ extension ContactChatViewController: ChatTagSearchDelegate {
         editorGroupVC.hidesBottomBarWhenPushed = true
         editorGroupVC.unique_l_pin = chat.pin
         editorGroupVC.referenceMessageId = chat.messageId
+        editorGroupVC.highlightQuery = globalSearch.currentQuery
         navigationController?.show(editorGroupVC, sender: nil)
     }
 }
@@ -2869,6 +2933,7 @@ extension ContactChatViewController: UISearchControllerDelegate, UISearchBarDele
         // Only the words are gone. The chip the reader picked is still on screen and still
         // highlighted, so the filter stays until they turn it off there.
         tagSearch.setSearchText("")
+        globalSearch.clear()
         tableView.isScrollEnabled = !tagSearch.isShowingResults
     }
     

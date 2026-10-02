@@ -83,7 +83,7 @@ public class CreateSeminarViewController: UITableViewController {
         navigationController?.navigationBar.standardAppearance = navBarAppearance
         navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
         
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(didTapCancel(sender:)))
+        navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(didTapCancel(sender:)))
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Start".localized(), style: .plain, target: self, action: #selector(didTapRight(sender:)))
         
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))

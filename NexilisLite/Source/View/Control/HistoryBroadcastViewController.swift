@@ -28,7 +28,7 @@ class HistoryBroadcastViewController: UIViewController, UITableViewDelegate, UIT
         
         title = "Notification Center".localized()
         
-        navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .cancel, target: self, action: #selector(cancel(sender:)))
+        navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(cancel(sender:)), wordColour: .white)
         
         let attributes = [NSAttributedString.Key.font: UIFont.boldSystemFont(ofSize: 16.0), NSAttributedString.Key.foregroundColor: UIColor.white]
         let navBarAppearance = UINavigationBarAppearance()

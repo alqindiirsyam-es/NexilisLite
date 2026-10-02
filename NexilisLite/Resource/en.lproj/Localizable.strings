@@ -6,5 +6,20 @@
   
 */
 "%d unread message" = "%d unread message";
+"Minimize" = "Minimize";
+"End Session" = "End Session";
+"Are you sure you want to end/minimize the Call Center?" = "Are you sure you want to end/minimize the Call Center?";
 "%d unread messages" = "%d unread messages";
 "The camera and the microphone belong to the call until it ends." = "The camera and the microphone belong to the call until it ends.";
+"Your Call Center request was sent. Please wait for an officer." = "Your Call Center request was sent. Please wait for an officer.";
+"All Call Center officers are busy. Open your request to choose whether to wait." = "All Call Center officers are busy. Open your request to choose whether to wait.";
+"Your Call Center request could not be processed. Open your request to continue." = "Your Call Center request could not be processed. Open your request to continue.";
+"Your Call Center request was accepted by %@." = "Your Call Center request was accepted by %@.";
+"End" = "End";
+"Call Center is Online" = "Call Center is Online";
+"Completed" = "Completed";
+"Pending" = "Pending";
+"Officer" = "Officer";
+"Requester" = "Requester";
+"End session as" = "End session as";
+"Choose the status of this Call Center session" = "Choose the status of this Call Center session";

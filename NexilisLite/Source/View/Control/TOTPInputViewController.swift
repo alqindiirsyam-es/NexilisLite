@@ -353,7 +353,7 @@ private extension TOTPInputViewController {
     }
 
     func alert(_ msg: String) {
-        let a = UIAlertController(title: nil, message: msg, preferredStyle: .alert)
+        let a = LibAlertController(title: nil, message: msg, preferredStyle: .alert)
         a.addAction(.init(title: "OK", style: .default))
         present(a, animated: true)
     }

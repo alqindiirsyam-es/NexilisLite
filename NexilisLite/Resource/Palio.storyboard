@@ -855,13 +855,13 @@
                                                             <rect key="frame" x="8" y="162" width="358" height="34.5"/>
                                                             <color key="tintColor" white="0.0" alpha="0.0" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                                                             <state key="normal" title="Button"/>
-                                                            <buttonConfiguration key="configuration" style="filled" title="Contact Center History"/>
+                                                            <buttonConfiguration key="configuration" style="filled" title="Call Center History"/>
                                                         </button>
                                                         <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="system" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="9ck-VQ-0zT">
                                                             <rect key="frame" x="8" y="216.5" width="358" height="34.5"/>
                                                             <color key="tintColor" white="0.0" alpha="0.0" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                                                             <state key="normal" title="Button"/>
-                                                            <buttonConfiguration key="configuration" style="filled" title="Contact Center History"/>
+                                                            <buttonConfiguration key="configuration" style="filled" title="Call Center History"/>
                                                         </button>
                                                         <switch opaque="NO" contentMode="scaleToFill" horizontalHuggingPriority="750" verticalHuggingPriority="750" contentHorizontalAlignment="center" contentVerticalAlignment="center" translatesAutoresizingMaskIntoConstraints="NO" id="oaQ-vC-3bV">
                                                             <rect key="frame" x="303" y="43" width="63" height="28"/>

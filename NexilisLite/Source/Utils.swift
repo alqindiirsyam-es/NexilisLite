@@ -9,8 +9,14 @@
 import Foundation
 import AudioToolbox
 import UIKit
+import UserNotifications
 import FMDB
-import NotificationBannerSwift
+// Not a plain import: a plain one names the module in the generated .swiftinterface, and every app using the
+// binary pod then had to declare `pod 'NotificationBannerSwift'` itself or fail with
+// "MissingModuleOnKnownPaths: unable to resolve module dependency". The code is absorbed into
+// NexilisLite.framework (statically linked, not an @rpath dependency), so nothing outside needs the module -
+// this was the one file of 39 still importing it plainly.
+@_implementationOnly import NotificationBannerSwift
 import nuSDKService
 import CoreLocation
 import CryptoKit
@@ -24,6 +30,160 @@ import NexilisZTA
 //import var CommonCrypto.CC_MD5_DIGEST_LENGTH
 //import func CommonCrypto.CC_MD5
 //import typealias CommonCrypto.CC_LONG
+
+/// Localized UI labels are not call status identifiers. Keep legacy en/id records readable
+/// without depending on the currently selected language. New records use canonical labels.
+enum CallRecord {
+    static func status(scope: String, sender: String, currentUser: String) -> String {
+        if scope == MessageScope.MISSED_CALL { return "3" }
+        return !currentUser.isEmpty && sender == currentUser ? "2" : "1"
+    }
+
+    static func isVideo(_ storedText: String) -> Bool {
+        let label = storedText.components(separatedBy: " at ").first?
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return ["incoming video call", "outgoing video call", "missed video call",
+                "video call", "panggilan video", "panggilan video tak terjawab"].contains(label)
+    }
+}
+
+/// A thumbnail made from the picture itself, for a message whose own thumbnail cannot be had.
+///
+/// Fix: a picture whose thumbnail file would not decode - or could not be downloaded - showed as an
+/// empty space in its bubble and in the search results, although the picture itself was on the
+/// device and opened perfectly well. The picture, scaled down the same way a thumbnail is, stands in
+/// for the thumbnail and is kept under the thumbnail's own name, so everything that asks for that
+/// thumbnail finds it.
+enum ThumbnailFallback {
+    private static let queue = DispatchQueue(label: "io.nexilis.thumbnailFallback", qos: .userInitiated)
+    private static let lock = NSLock()
+    private static var inFlight = Set<String>()
+
+    /// Whether a file of that name is on the device, plain or in the secure store.
+    static func isOnDevice(_ name: String) -> Bool {
+        guard !name.isEmpty else {
+            return false
+        }
+        if FileEncryption.shared.isSecureExists(filename: name) {
+            return true
+        }
+        guard let dirPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first else {
+            return false
+        }
+        return FileManager.default.fileExists(atPath: URL(fileURLWithPath: dirPath).appendingPathComponent(name).path)
+    }
+
+    /// The picture named `image`, read and scaled down to a thumbnail. Nil when it is not on the
+    /// device or will not decode. Reads and decodes a whole picture: never on the main thread.
+    static func fromFullImage(named image: String) -> UIImage? {
+        guard !image.isEmpty else {
+            return nil
+        }
+        var bytes: Data?
+        if let dirPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first {
+            let path = URL(fileURLWithPath: dirPath).appendingPathComponent(image).path
+            if FileManager.default.fileExists(atPath: path) {
+                bytes = try? Data(contentsOf: URL(fileURLWithPath: path))
+            }
+        }
+        if bytes == nil, var stored = try? FileEncryption.shared.readSecure(filename: image, withoutBiometric: true) {
+            if let plain = FileEncryption.shared.decryptFileFromServer(data: stored) {
+                stored = plain
+            }
+            bytes = stored
+        }
+        guard let data = bytes else {
+            return nil
+        }
+        return UIImage.thumbnail(from: data)
+    }
+
+    /// Makes the thumbnail from `image` away from the main thread, keeps it in the image cache as
+    /// `thumb`, and hands it back on the main thread - nil when there was nothing to make it from.
+    /// One at a time for each thumbnail, however many rows ask.
+    static func load(fromImage image: String, as thumb: String, then done: @escaping (UIImage?) -> Void) {
+        guard !thumb.isEmpty, !image.isEmpty else {
+            done(nil)
+            return
+        }
+        if let ready = Nexilis.imageCache.object(forKey: thumb as NSString) {
+            done(ready)
+            return
+        }
+        lock.lock()
+        let started = inFlight.insert(thumb).inserted
+        lock.unlock()
+        guard started else {
+            return
+        }
+        queue.async {
+            let picture = fromFullImage(named: image)
+            if let picture = picture {
+                Nexilis.imageCache.setObject(picture, forKey: thumb as NSString)
+            }
+            lock.lock()
+            inFlight.remove(thumb)
+            lock.unlock()
+            DispatchQueue.main.async { done(picture) }
+        }
+    }
+}
+
+/// The watch a call screen keeps on the SDK's audio engine: every half second, restart it if it has
+/// stopped. Restarting and tearing the call down must never overlap - AVAudioEngine raises from
+/// inside the SDK when a node is disconnected from an engine that is being rebuilt, which is the
+/// crash seen on leaving a live stream - so restarts run on one serial queue, and the call is only
+/// ended on that queue's far side, once any restart under way has finished and none can follow.
+///
+/// Nothing here blocks the caller: a call is usually ended from the main thread, and restarting
+/// the engine may itself need the main thread.
+final class AudioEngineWatch {
+    private let queue: DispatchQueue
+    private let lock = NSLock()
+    private var running = false
+    private var stopped = false
+
+    init(label: String) {
+        queue = DispatchQueue(label: label)
+    }
+
+    /// A new call: whatever the last one left behind does not stop this one's watch.
+    func arm() {
+        lock.lock(); stopped = false; running = false; lock.unlock()
+    }
+
+    /// Starts the watch, unless the call has already been ended - the watch is started a moment
+    /// after the call connects, and the call can be ended in that moment.
+    @discardableResult
+    func start() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !stopped else { return false }
+        running = true
+        return true
+    }
+
+    var isRunning: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return running
+    }
+
+    /// From the watch's own loop: restarts the engine if it is down and the watch still runs.
+    /// True when it restarted it.
+    func restartIfNeeded() -> Bool {
+        return queue.sync {
+            guard isRunning, !API.bAudioEngineIsRunning() else { return false }
+            API.restartAudioEngine()
+            return true
+        }
+    }
+
+    /// Stops the watch, then - on the main thread, once no restart is under way - runs `teardown`.
+    func stop(then teardown: (() -> Void)? = nil) {
+        lock.lock(); stopped = true; running = false; lock.unlock()
+        guard let teardown = teardown else { return }
+        queue.async { DispatchQueue.main.async(execute: teardown) }
+    }
+}
 
 public final class Utils {
     public static let M_USER_ANDROID_ID = "UNK"
@@ -491,8 +651,8 @@ public final class Utils {
         } else if chat.messageScope == MessageScope.CALL || chat.messageScope == MessageScope.MISSED_CALL {
             let imageAttachment = NSTextAttachment()
             var stringImage = ""
-            let isVideo = chat.messageText.lowercased().contains("video")
-            let type = chat.messageText.lowercased().contains("incoming") ? "1" : chat.messageText.lowercased().contains("outgoing") ? "2" : "3"
+            let isVideo = CallRecord.isVideo(chat.messageText)
+            let type = CallRecord.status(scope: chat.messageScope, sender: chat.fpin, currentUser: User.getMyPin() ?? "")
             var textPreview = ""
             if isVideo && type == "2" {
                 stringImage = "arrow.up.right.video.fill"
@@ -1814,7 +1974,10 @@ public final class Utils {
         return true
     }
 
-    public static func authenticateWithBiometrics(isSaveState: Bool = false, completion: @escaping (Bool, String?) -> Void) {
+    public static func authenticateWithBiometrics(isSaveState: Bool = false, verifySavedState: Bool = false,
+                                                recordAuthentication: Bool = true,
+                                                onVerifiedContext: ((LAContext) -> Void)? = nil,
+                                                completion: @escaping (Bool, String?) -> Void) {
         guard shouldRequestAuthentication() else {
             completion(true, nil)
             return
@@ -1839,15 +2002,24 @@ public final class Utils {
             }
             evaluate { success, error in
                 if success {
+                    if verifySavedState {
+                        guard let saved = Utils.getBiometricState(),
+                              let current = context.evaluatedPolicyDomainState, saved == current else {
+                            completion(false, "Biometric enrollment changed; use your password.")
+                            return
+                        }
+                    }
                     // Store the time of successful authentication
                     if let domainState = context.evaluatedPolicyDomainState, isSaveState {
                         Utils.setBiometricState(value: domainState)
                     }
-                    SecureUserDefaults.shared.set(Date(), forKey: "lastAuthenticationTime")
-                    // The same confirmation opens the mode-1 master key (its Keychain biometric ACL):
-                    // without this the database / preference reads that follow asked for Face ID again
-                    // seconds later, on a context of their own.
-                    MasterKeyUtil.shared.adoptAuthenticatedContext(context)
+                    if recordAuthentication {
+                        SecureUserDefaults.shared.set(Date(), forKey: "lastAuthenticationTime")
+                        // Reuse the confirmation for the master-key ACL. Timer reauthentication
+                        // defers both this and the timestamp until the server accepts its proof.
+                        MasterKeyUtil.shared.adoptAuthenticatedContext(context)
+                    }
+                    onVerifiedContext?(context)
                     completion(true, nil)
                 } else {
                     let errorMessage = error?.localizedDescription ?? "Authentication failed"
@@ -3123,12 +3295,208 @@ public class ValidationTransactionLimit: UIViewController, UITextFieldDelegate {
     }
 }
 
+/// Android CCSView's officer-side request details, independent of transport/UI.
+enum ContactCenterOfficerRequestDetails {
+    static let keys = ["wlc_device", "wlc_time", "wlc_longitude", "wlc_latitude",
+                       "wlc_activity", "wlc_error_description", "wlc_address"]
+
+    static func metadata(from payload: [String: Any]) -> [String: String] {
+        var result: [String: String] = [:]
+        for key in keys {
+            if let value = payload[key] as? String { result[key] = value }
+            else if let value = payload[key] as? NSNumber { result[key] = value.stringValue }
+        }
+        return result
+    }
+
+    /// Android ChatCCRoom sends this real chat message once on a new officer session.
+    static func welcome(name: String, officer: String, company: String, metadata: [String: String],
+                        hour: Int, now: Date = Date()) -> String {
+        let greeting: String
+        if hour < 12 { greeting = "Good Morning".localized() }
+        else if hour < 16 { greeting = "Good Afternoon".localized() }
+        else if hour < 21 { greeting = "Good Evening".localized() }
+        else { greeting = "Good Night".localized() }
+        let introduction = "\(greeting) \(name), \("thank you for contacting".localized()) \(company) \("Call Center".localized()). \("My name is".localized()) \(officer)"
+        guard let device = metadata["wlc_device"], !device.isEmpty else {
+            return introduction + ", " + "how can i help you?".localized()
+        }
+        // Request Type appears in the incoming dialog, but Android omits it from this message.
+        let details = rows(name: name, channel: "0", metadata: metadata, now: now)
+            .enumerated().filter { $0.offset != 1 }
+            .map { "\($0.element.0) :\n*\($0.element.1)*" }.joined(separator: "\n")
+        return introduction + ". " + "Currently we detected your data:".localized()
+            + "\n\n" + details + "\n\n" + "Is your data above correct?".localized()
+    }
+
+    static func rows(name: String, channel: String, metadata: [String: String], now: Date = Date()) -> [(String, String)] {
+        func value(_ key: String) -> String {
+            guard let text = metadata[key], !text.isEmpty else { return "-" }
+            return text
+        }
+        let types = ["0": "Chat", "1": "Audio Call", "2": "Video Call", "3": "Email",
+                     "4": "Secure SMS", "5": "GSM Call", "6": "WhatsApp", "7": "GPT Chatbot"]
+        let millis = Double(metadata["wlc_time"] ?? "0") ?? 0
+        let date = millis.isFinite && millis > 0 ? Date(timeIntervalSince1970: millis / 1000) : now
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return [("Name".localized(), name.isEmpty ? "-" : name),
+                ("Request Type".localized(), (types[channel] ?? "-").localized()),
+                ("Device".localized(), value("wlc_device")),
+                ("Time".localized(), formatter.string(from: date)),
+                ("Location".localized(), "\(value("wlc_address")) (\(value("wlc_longitude")), \(value("wlc_latitude")))"),
+                ("Activity".localized(), value("wlc_activity")),
+                ("Complaint".localized(), value("wlc_error_description"))]
+    }
+}
+
+/// Matches Android pb_lyt_confirm_call_center_mfa: top card, scrollable details,
+/// then Pass / I'll Handle side-by-side. No UIAlertController private-view edits.
+final class ContactCenterOfficerRequestDialog: UIViewController {
+    var displayName = ""
+    var channel = ""
+    var metadata: [String: String] = [:]
+    var onHandle: (() -> Void)?
+    var onPass: (() -> Void)?
+    private var resolving = false
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black.withAlphaComponent(0.5)
+        let card = UIView()
+        card.backgroundColor = .systemBackground
+        card.layer.cornerRadius = 6
+        card.clipsToBounds = true
+        view.addSubview(card)
+        card.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            card.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 6),
+            card.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -6),
+            card.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12)
+        ])
+        let content = UIStackView()
+        content.axis = .vertical
+        content.spacing = 12
+        card.addSubview(content)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: card.topAnchor, constant: 6),
+            content.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            content.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            content.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12)
+        ])
+        let header = UIStackView()
+        header.alignment = .center
+        header.spacing = 8
+        let logo = UIImageView(image: UIImage(named: "pb_ball", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+            ?? UIImage(named: "pb_startup_icontitle", in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
+        logo.contentMode = .scaleAspectFit
+        logo.widthAnchor.constraint(equalToConstant: 48).isActive = true
+        logo.heightAnchor.constraint(equalToConstant: 48).isActive = true
+        let title = UILabel()
+        title.text = "Call Center".localized()
+        title.font = .boldSystemFont(ofSize: 18)
+        title.textColor = .label
+        title.textAlignment = .center
+        let close = UIButton(type: .system)
+        close.setImage(UIImage(systemName: "xmark"), for: .normal)
+        close.tintColor = .label
+        close.accessibilityLabel = "Close".localized()
+        close.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        close.heightAnchor.constraint(equalToConstant: 30).isActive = true
+        close.addTarget(self, action: #selector(passTapped), for: .touchUpInside)
+        [logo, title, close].forEach { header.addArrangedSubview($0) }
+        content.addArrangedSubview(header)
+
+        let scroll = UIScrollView()
+        scroll.alwaysBounceVertical = false
+        let details = UIStackView()
+        details.axis = .vertical
+        details.spacing = 6
+        scroll.addSubview(details)
+        details.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            details.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            details.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+            details.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+            details.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            details.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor)
+        ])
+        let caption = UILabel()
+        caption.text = "Detailed user data from the call center request:".localized()
+        caption.font = .systemFont(ofSize: 11)
+        caption.textColor = .label
+        caption.numberOfLines = 0
+        details.addArrangedSubview(caption)
+        for (label, value) in ContactCenterOfficerRequestDetails.rows(name: displayName, channel: channel, metadata: metadata) {
+            let field = UILabel()
+            field.numberOfLines = 0
+            field.textColor = .label
+            let text = NSMutableAttributedString(string: label + " :\n", attributes: [.font: UIFont.systemFont(ofSize: 11)])
+            text.append(NSAttributedString(string: value, attributes: [.font: UIFont.boldSystemFont(ofSize: 11)]))
+            field.attributedText = text
+            details.addArrangedSubview(field)
+        }
+        content.addArrangedSubview(scroll)
+        let naturalHeight = scroll.heightAnchor.constraint(equalTo: details.heightAnchor)
+        naturalHeight.priority = .defaultHigh
+        naturalHeight.isActive = true
+        scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 80).isActive = true
+
+        let buttons = UIStackView()
+        buttons.spacing = 8
+        buttons.distribution = .fillEqually
+        let pass = actionButton(title: "Pass to other representative".localized(), primary: false)
+        pass.addTarget(self, action: #selector(passTapped), for: .touchUpInside)
+        let handle = actionButton(title: "I'll handle the customer".localized(), primary: true)
+        handle.addTarget(self, action: #selector(handleTapped), for: .touchUpInside)
+        buttons.addArrangedSubview(pass)
+        buttons.addArrangedSubview(handle)
+        buttons.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true
+        content.addArrangedSubview(buttons)
+    }
+
+    private func actionButton(title: String, primary: Bool) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setTitle(title, for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 11)
+        button.titleLabel?.numberOfLines = 2
+        button.titleLabel?.textAlignment = .center
+        button.backgroundColor = primary ? .mainColor : .secondarySystemBackground
+        button.setTitleColor(primary ? .white : .mainColor, for: .normal)
+        button.layer.cornerRadius = 18
+        button.contentEdgeInsets = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        return button
+    }
+
+    @objc private func handleTapped() { resolve(accept: true) }
+    @objc private func passTapped() { resolve(accept: false) }
+
+    private func resolve(accept: Bool) {
+        guard !resolving else { return }
+        resolving = true
+        let action = accept ? onHandle : onPass
+        onHandle = nil
+        onPass = nil
+        dismiss(animated: true, completion: action)
+    }
+}
+
 public class DialogErrorMFA: UIViewController {
     
     public var errorDesc = ""
     public var method = ""
+    /// Authentication-step metadata for Contact Center, matching Android's authType field.
+    /// Leave empty when the caller has no step metadata; keep its position in the payload.
+    public var authType = ""
     public var hideTryAgain = false
     public var countRetry = 1
+    /// Optional guidance for password fallback or non-counted failures.
+    public var contentMessage: String?
+    public var secondaryActionTitle: String?
+    var onSecondaryAction: (() -> Void)?
     var isDismiss: ((Int) -> ())?
     
     public override func viewDidLoad() {
@@ -3151,7 +3519,7 @@ public class DialogErrorMFA: UIViewController {
         container.addSubview(title)
         title.anchor(top: container.topAnchor, paddingTop: 15, centerX: container.centerXAnchor, maxWidth: UIScreen.main.bounds.width / 2)
         
-        let imageWarning = UIImageView(image: UIImage(named: "pb_security_warning_green", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        let imageWarning = UIImageView(image: UIImage(named: "pb_security_warning_green", in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
         container.addSubview(imageWarning)
         imageWarning.anchor(top: container.topAnchor, right: title.leftAnchor, paddingTop: 10, paddingRight: -5, width: 30, height: 30)
         
@@ -3159,13 +3527,14 @@ public class DialogErrorMFA: UIViewController {
         container.addSubview(imageLogo)
         imageLogo.anchor(top: container.topAnchor, left: container.leftAnchor, paddingTop: 10, paddingLeft: 10, width: 40, height: 40)
         
-        let imageChat = UIImageView(image: UIImage(named: "pb_startup_iconsuffix", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        let imageChat = UIImageView(image: UIImage(named: "pb_startup_iconsuffix", in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
         container.addSubview(imageChat)
         imageChat.anchor(top: container.topAnchor, right: container.rightAnchor, paddingTop: 10, paddingRight: 10, width: 30, height: 30)
         
         var contentDesc = "Pastikan data yang anda masukkan benar dan valid!"
         contentDesc += "\nMaksimal Percobaan 3 kali. (\(countRetry)/3)"
         contentDesc += "\nAktivitas: \(method)"
+        if let contentMessage { contentDesc = contentMessage + "\nAktivitas: \(method)" }
 //        if hideTryAgain {
 //            contentDesc = "Silakan hubungi Contact Center BJB untuk bantuan lebih lanjut atau Silahkan Sign Up/Sign In Ulang"
 //        }
@@ -3176,20 +3545,16 @@ public class DialogErrorMFA: UIViewController {
         container.addSubview(contentS)
         contentS.anchor(top: title.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, paddingTop: 20, paddingLeft: 15, paddingRight: 10)
         
-//        let buttonCC = UIButton(type: .custom)
-//        buttonCC.setTitle("Call Center", for: .normal)
-//        buttonCC.backgroundColor = .gray
-//        buttonCC.titleLabel?.textColor = .white
-//        buttonCC.titleLabel?.font = .boldSystemFont(ofSize: 14)
-//        buttonCC.layer.cornerRadius = 17.5
-//        buttonCC.clipsToBounds = true
-//        buttonCC.addTarget(self, action: #selector(ccTapped), for: .touchUpInside)
-//        container.addSubview(buttonCC)
-//        if !hideTryAgain {
-//            buttonCC.anchor(top: contentS.bottomAnchor, paddingTop: 20, centerX: container.centerXAnchor, width: UIScreen.main.bounds.width / 3 - 30, height: 35)
-//        } else {
-//            buttonCC.anchor(top: contentS.bottomAnchor, left: container.leftAnchor, paddingTop: 20, paddingLeft: 5, width: UIScreen.main.bounds.width / 2 - 30, height: 35)
-//        }
+        let buttonCC = UIButton(type: .custom)
+        buttonCC.setTitle("Call Center".localized(), for: .normal)
+        buttonCC.backgroundColor = .gray
+        buttonCC.setTitleColor(.white, for: .normal)
+        buttonCC.titleLabel?.font = .boldSystemFont(ofSize: 14)
+        buttonCC.layer.cornerRadius = 17.5
+        buttonCC.clipsToBounds = true
+        buttonCC.addTarget(self, action: #selector(ccTapped), for: .touchUpInside)
+        // Android TFADialogSecurity also wires this action but keeps btn_cc GONE.
+        buttonCC.isHidden = true
         
         let buttonTryAgain = UIButton(type: .custom)
         buttonTryAgain.setTitle("Coba Lagi", for: .normal)
@@ -3199,6 +3564,7 @@ public class DialogErrorMFA: UIViewController {
         buttonTryAgain.layer.cornerRadius = 17.5
         buttonTryAgain.clipsToBounds = true
         buttonTryAgain.addTarget(self, action: #selector(tryAgainTapped), for: .touchUpInside)
+        buttonTryAgain.isHidden = hideTryAgain
         
         let buttonReject = UIButton(type: .custom)
         buttonReject.setTitle("Tutup", for: .normal)
@@ -3209,13 +3575,23 @@ public class DialogErrorMFA: UIViewController {
         buttonReject.clipsToBounds = true
         buttonReject.addTarget(self, action: #selector(rejectTapped), for: .touchUpInside)
         
-        let stack = UIStackView(arrangedSubviews: [buttonTryAgain, buttonReject])
-        stack.axis = .horizontal
+        var buttons = [buttonTryAgain, buttonCC, buttonReject]
+        if let secondaryActionTitle {
+            let fallback = UIButton(type: .system)
+            fallback.setTitle(secondaryActionTitle, for: .normal)
+            fallback.backgroundColor = .systemGray
+            fallback.setTitleColor(.white, for: .normal)
+            fallback.layer.cornerRadius = 17.5
+            fallback.addTarget(self, action: #selector(secondaryTapped), for: .touchUpInside)
+            buttons.insert(fallback, at: 1)
+        }
+        let stack = UIStackView(arrangedSubviews: buttons)
+        stack.axis = secondaryActionTitle == nil ? .horizontal : .vertical
         stack.spacing = 10
-        stack.alignment = .center
+        stack.alignment = .fill
         stack.distribution = .fillEqually
         container.addSubview(stack)
-        stack.anchor(top: contentS.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, paddingTop: 10, paddingLeft: 15, paddingRight: 15, height: 35)
+        stack.anchor(top: contentS.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, paddingTop: 10, paddingLeft: 15, paddingRight: 15, height: secondaryActionTitle == nil ? 35 : (hideTryAgain ? 80 : 125))
         
         let footer = UILabel()
         footer.text = "We value your security".localized()
@@ -3232,9 +3608,11 @@ public class DialogErrorMFA: UIViewController {
     }
     
     @objc func ccTapped() {
-        let contentDesc = getContentDesc()
-        self.dismiss(animated: true, completion: { [self] in
-            APIS.openContactCenterWithContext(context: "\(contentDesc)~\(method)~\(errorDesc)")
+        // Same four fields as Android openContactCenterWithWelcome:
+        // welcome message ~ activity ~ authentication type ~ error description.
+        let context = "\(getContentDesc())~\(method)~\(authType)~\(errorDesc)"
+        self.dismiss(animated: true, completion: {
+            APIS.openContactCenterWithContext(context: context)
         })
     }
     
@@ -3245,8 +3623,11 @@ public class DialogErrorMFA: UIViewController {
     }
     
     @objc func rejectTapped() {
-        self.dismiss(animated: true)
-        self.isDismiss?(0)
+        self.dismiss(animated: true, completion: { self.isDismiss?(0) })
+    }
+
+    @objc func secondaryTapped() {
+        self.dismiss(animated: true, completion: { self.onSecondaryAction?() })
     }
 }
 
@@ -3340,7 +3721,7 @@ public class DialogBroadcastInApp: UIViewController {
             if title.starts(with: "call_") {
                 finalTitleButton = "Call " + title.component(1, separatedBy: "_")
             } else if title == "cc" {
-                finalTitleButton = "Contact Center"
+                finalTitleButton = "Call Center".localized()
             }
             
             let button = UIButton(type: .system)
@@ -6927,6 +7308,571 @@ public final class RestoreProgressManager {
     }
 }
 
+/// Reserves a requester slot before any asynchronous send. A closed editor cannot release it.
+enum ContactCenterRequestGate {
+    private static let lock = NSLock()
+    private static var inFlight: UUID?
+
+    private static var blockedState: Bool {
+        let waiting: Bool = SecureUserDefaults.shared.value(forKey: "waitingRequestCC") ?? false
+        let ongoing: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+        return inFlight != nil || waiting || !ongoing.isEmpty
+    }
+
+    static var isBlocked: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return blockedState
+    }
+
+    static func reserve() -> UUID? {
+        lock.lock(); defer { lock.unlock() }
+        guard !blockedState else { return nil }
+        let token = UUID()
+        inFlight = token
+        SecureUserDefaults.shared.set(true, forKey: "waitingRequestCC")
+        return token
+    }
+
+    /// Only this send may update pending state. Accept/logout invalidates late responses.
+    @discardableResult static func finish(_ token: UUID, waitingForOfficer: Bool) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard inFlight == token else { return false }
+        inFlight = nil
+        let ongoing: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+        guard ongoing.isEmpty else {
+            SecureUserDefaults.shared.removeValue(forKey: "waitingRequestCC")
+            return false
+        }
+        if waitingForOfficer { SecureUserDefaults.shared.set(true, forKey: "waitingRequestCC") }
+        else { SecureUserDefaults.shared.removeValue(forKey: "waitingRequestCC") }
+        return true
+    }
+
+    static func reset() {
+        lock.lock(); defer { lock.unlock() }
+        inFlight = nil
+        SecureUserDefaults.shared.removeValue(forKey: "waitingRequestCC")
+    }
+}
+
+/// A CC ticket is a room, not a personal call. Its identity survives presentation changes.
+struct ContactCenterContext {
+    let requester: String
+    let officer: String
+    let ticket: String
+    let channel: String
+
+    init?(raw: String, channel: String) {
+        let fields = raw.components(separatedBy: ",")
+        guard fields.count == 3, fields.allSatisfy({ !$0.isEmpty }),
+              ["0", "1", "2"].contains(channel) else { return nil }
+        requester = fields[0]; officer = fields[1]; ticket = fields[2]; self.channel = channel
+    }
+
+    func opposite(for me: String) -> String? {
+        if me == requester { return officer }
+        if me == officer { return requester }
+        return nil // an invited member leaves; it must not end the whole room
+    }
+}
+
+/// Main-thread owner of CC lifetime. Navigation never sends end/leave or replaces a ticket.
+final class ContactCenterSession {
+    static let shared = ContactCenterSession()
+    private var endedTickets: Set<String> = []
+    private weak var editor: EditorPersonal?
+    private var retainedEditor: EditorPersonal?
+    private var retainedContainer: UIViewController?
+    private weak var audio: QmeraAudioViewController?
+    private weak var video: QmeraVideoViewController?
+    private var firstResponse: DispatchWorkItem?
+    private var pendingICS: Set<String> = []
+    private var handoffDeadline: Date?
+    private var editorVisible = false
+    private var chatOpeningTicket: String?
+    private var pendingEditor: EditorPersonal?
+    private var pendingContainer: UIViewController?
+    private var pendingDismissing = false
+    private var pendingResumeRequested = false
+    private var notifiedStatus: Set<String> = []
+
+    /// A generation belongs to one request, not to a translated message or a contact PIN.
+    func requestResult(editor: EditorPersonal, token: UUID, body: String) {
+        guard pendingEditor === editor else { return }
+        let generation: String = SecureUserDefaults.shared.value(forKey: "pendingCCNotificationID") ?? ""
+        guard generation == token.uuidString else { return }
+        notifyStatus(id: "request:\(generation)", ticket: "", body: body)
+    }
+
+    func isStatusCurrent(_ id: String) -> Bool {
+        if id.hasPrefix("accepted:") { return context?.ticket == String(id.dropFirst(9)) }
+        let generation: String = SecureUserDefaults.shared.value(forKey: "pendingCCNotificationID") ?? ""
+        return !generation.isEmpty && id == "request:\(generation)" && context == nil
+    }
+
+    func shouldHideStatus(_ id: String) -> Bool {
+        !isStatusCurrent(id) || (editorVisible && UIApplication.shared.applicationState == .active)
+    }
+
+    private func clearStatusNotifications() {
+        let ids: [String] = SecureUserDefaults.shared.value(forKey: "ccStatusNotificationIDs") ?? []
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
+        SecureUserDefaults.shared.removeValue(forKey: "ccStatusNotificationIDs")
+        notifiedStatus.removeAll()
+    }
+
+    private func notifyStatus(id: String, ticket: String, body: String, remotePush: Bool = false) {
+        let identifier = "nexilis.cc.status.\(id)"
+        if remotePush {
+            // The server already supplies an APNs alert; remove the SDK's socket fallback.
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [identifier])
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [identifier])
+        }
+        guard !shouldHideStatus(id), notifiedStatus.insert(id).inserted else { return }
+        let title = "Call Center".localized()
+        let info: [String: String] = ["nexilis_cc_status": id, "cc_ticket": ticket, "cc_owner": User.getMyPin() ?? ""]
+        if UIApplication.shared.applicationState == .active {
+            presentStatus(info: info, title: title, body: body)
+        } else if !remotePush {
+            let content = UNMutableNotificationContent()
+            content.title = title; content.body = body; content.sound = .default
+            content.userInfo = info
+            var ids: [String] = SecureUserDefaults.shared.value(forKey: "ccStatusNotificationIDs") ?? []
+            if !ids.contains(identifier) { ids.append(identifier) }
+            SecureUserDefaults.shared.set(ids, forKey: "ccStatusNotificationIDs")
+            let request = UNNotificationRequest(identifier: identifier, content: content,
+                trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
+            UNUserNotificationCenter.current().add(request)
+        }
+    }
+
+    func presentStatus(info: [AnyHashable: Any], title: String, body: String) {
+        guard let id = info["nexilis_cc_status"] as? String,
+              info["cc_owner"] as? String == User.getMyPin(), !shouldHideStatus(id) else { return }
+        InAppBanner.shared.present(InAppBanner.Content(conversationId: "cc-status:\(id)", title: title,
+            body: NSAttributedString(string: body), avatar: UIImageView(image: UIImage(systemName: "person.crop.circle")),
+            onTap: { [weak self] in _ = self?.openStatus(info) }))
+    }
+
+    @discardableResult func openStatus(_ info: [AnyHashable: Any]) -> Bool {
+        guard let id = info["nexilis_cc_status"] as? String else { return false }
+        // Recognized but obsolete/another account: do not fall through to a personal chat.
+        guard info["cc_owner"] as? String == User.getMyPin(), isStatusCurrent(id) else { return true }
+        _ = resumeExistingEditor()
+        return true
+    }
+
+    func retainPending(editor: EditorPersonal, requestToken: UUID? = nil) {
+        guard editor.isContactCenter, editor.isRequestContactCenter, context == nil else { return }
+        if let requestToken {
+            clearStatusNotifications()
+            SecureUserDefaults.shared.set(requestToken.uuidString, forKey: "pendingCCNotificationID")
+        }
+        pendingEditor = editor
+        pendingContainer = editor.navigationController ?? editor
+        self.editor = editor
+        editorVisible = pendingContainer?.presentingViewController != nil && !pendingDismissing
+        SecureUserDefaults.shared.set(editor.channelContactCenter, forKey: "pendingCCChannel")
+    }
+
+    /// Back is navigation, not cancellation. Keep observers and the in-flight response target.
+    func backFromPending(editor: EditorPersonal) -> Bool {
+        guard context == nil, pendingEditor === editor, let container = pendingContainer else { return false }
+        editorVisible = false
+        guard let presenter = container.presentingViewController else { return true }
+        pendingDismissing = true
+        presenter.dismiss(animated: true) { [weak self] in
+            guard let self else { return }
+            self.pendingDismissing = false
+            if self.pendingResumeRequested {
+                self.pendingResumeRequested = false
+                _ = self.resumeExistingEditor()
+            }
+        }
+        return true
+    }
+
+    @discardableResult func resumeExistingEditor() -> Bool {
+        if pendingDismissing { pendingResumeRequested = true; return true }
+        if let current = context {
+            openChat(ticket: current.ticket)
+            return true
+        }
+        if pendingEditor == nil, ContactCenterRequestGate.isBlocked {
+            // Recover persisted pending state without re-running the request/channel picker.
+            let chat = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "editorPersonalVC") as! EditorPersonal
+            chat.isContactCenter = true; chat.isResumingPendingCC = true
+            chat.channelContactCenter = SecureUserDefaults.shared.value(forKey: "pendingCCChannel") ?? "0"
+            let navigation = CustomNavigationController(rootViewController: chat)
+            navigation.modalPresentationStyle = .fullScreen
+            retainPending(editor: chat)
+        }
+        guard let container = pendingContainer else { return false }
+        if container.presentingViewController != nil { return true }
+        guard let host = presentationHost() else { return true }
+        host.present(container, animated: true)
+        return true
+    }
+
+    func discardPendingEditor() {
+        if !Thread.isMainThread { DispatchQueue.main.async { self.discardPendingEditor() }; return }
+        clearStatusNotifications()
+        SecureUserDefaults.shared.removeValue(forKey: "pendingCCNotificationID")
+        let closing = pendingEditor
+        if let closing, editor === closing { editor = nil; editorVisible = false }
+        pendingEditor = nil; pendingContainer = nil
+        pendingResumeRequested = false; pendingDismissing = false
+        SecureUserDefaults.shared.removeValue(forKey: "pendingCCChannel")
+        closing?.closeContactCenterPresentation()
+    }
+
+    var context: ContactCenterContext? {
+        let raw: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+        let channel: String = SecureUserDefaults.shared.value(forKey: "channelCC") ?? ""
+        return ContactCenterContext(raw: raw, channel: channel)
+    }
+
+    func receive(_ message: TMessage, remotePush: Bool = false) {
+        if !Thread.isMainThread { DispatchQueue.main.async { self.receive(message, remotePush: remotePush) }; return }
+        let code = message.getCode()
+        if code == CoreMessage_TMessageCode.ACCEPT_CALL_CENTER {
+            let ticket = message.getBody(key: CoreMessage_TMessageKey.DATA)
+            let officer = message.getBody(key: CoreMessage_TMessageKey.F_PIN)
+            let channel = message.getBody(key: CoreMessage_TMessageKey.CHANNEL)
+            let requester = message.getBody(key: CoreMessage_TMessageKey.UPLINE_PIN)
+            let existing = context
+            guard !ticket.isEmpty, !officer.isEmpty, !endedTickets.contains(ticket),
+                  ["0", "1", "2"].contains(channel), existing == nil || existing?.ticket == ticket else { return }
+            let customer = !requester.isEmpty ? requester : existing?.requester ?? User.getMyPin() ?? ""
+            guard !customer.isEmpty else { return }
+            SecureUserDefaults.shared.set("\(customer),\(officer),\(ticket)", forKey: "onGoingCC")
+            SecureUserDefaults.shared.set(channel, forKey: "channelCC")
+            SecureUserDefaults.shared.set(officer, forKey: "membersCC")
+            let started: String = SecureUserDefaults.shared.value(forKey: "startTimeCC") ?? ""
+            if started.isEmpty { SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: "startTimeCC") }
+            ContactCenterRequestGate.reset()
+            if existing == nil { clearStatusNotifications() }
+            SecureUserDefaults.shared.removeValue(forKey: "pendingCCNotificationID")
+            if let pending = pendingEditor, customer == User.getMyPin() {
+                pending.complaintId = ticket
+                pending.channelContactCenter = channel
+                pending.isResumingPendingCC = false
+                editor = pending
+                if channel == "0" {
+                    retainedEditor = pending; retainedContainer = pendingContainer
+                }
+                pendingEditor = nil; pendingContainer = nil
+                SecureUserDefaults.shared.removeValue(forKey: "pendingCCChannel")
+            }
+            if existing == nil, channel != "0", customer == User.getMyPin() { handoffDeadline = Date().addingTimeInterval(1.1) }
+            if customer == User.getMyPin() {
+                let displayName = message.getBody(key: CoreMessage_TMessageKey.F_DISPLAY_NAME)
+                let name = displayName.isEmpty ? User.getDataCanNil(pin: officer)?.fullName ?? officer : displayName
+                notifyStatus(id: "accepted:\(ticket)", ticket: ticket,
+                    body: String(format: "Your Call Center request was accepted by %@.".localized(), name), remotePush: remotePush)
+                if !editorVisible { showChatIndicator() }
+            }
+        } else if let current = context {
+            let ticket = message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID)
+            if ticket == current.ticket && message.getBody(key: CoreMessage_TMessageKey.F_PIN) == current.requester {
+                firstResponse?.cancel(); firstResponse = nil
+            }
+            if [CoreMessage_TMessageCode.END_CALL_CENTER, CoreMessage_TMessageCode.TIMEOUT_CONTACT_CENTER,
+                CoreMessage_TMessageCode.INVITE_END_CONTACT_CENTER, CoreMessage_TMessageCode.INVITE_EXIT_CONTACT_CENTER].contains(code) {
+                let eventTicket = message.getBody(key: CoreMessage_TMessageKey.DATA)
+                let from = message.getBody(key: CoreMessage_TMessageKey.F_PIN)
+                let sender = from.isEmpty ? message.getPIN() : from
+                // CC06 can carry only the sender/channel, without a ticket (server timeout route).
+                let legacyTimeout = code == CoreMessage_TMessageCode.TIMEOUT_CONTACT_CENTER &&
+                    eventTicket.isEmpty && ticket.isEmpty && (sender == current.requester || sender == current.officer)
+                guard eventTicket == current.ticket || ticket == current.ticket || legacyTimeout else { return }
+                if sender == current.requester || sender == current.officer || code == CoreMessage_TMessageCode.TIMEOUT_CONTACT_CENTER {
+                    // The officer says how it ended; nothing said is Completed.
+                    let said = code == CoreMessage_TMessageCode.END_CALL_CENTER
+                        ? message.getBody(key: CoreMessage_TMessageKey.STATUS) : ""
+                    end(ticket: current.ticket, notifyServer: false,
+                        status: said == ContactCenterSession.pending ? ContactCenterSession.pending : ContactCenterSession.completed)
+                }
+            } else if code == CoreMessage_TMessageCode.PUSH_MEMBER_ROOM_CONTACT_CENTER,
+                      (ticket == current.ticket || message.getBody(key: CoreMessage_TMessageKey.DATA).hasPrefix("[")) {
+                let data = message.getBody(key: CoreMessage_TMessageKey.DATA).data(using: .utf8)
+                if let data, let members = try? JSONSerialization.jsonObject(with: data) as? [String] {
+                    SecureUserDefaults.shared.set(members.filter { $0 != User.getMyPin() }.joined(separator: ","), forKey: "membersCC")
+                }
+            }
+        }
+    }
+
+    func incoming(_ message: TMessage, retry: Int = 0) {
+        let packet = message.getBody(key: CoreMessage_TMessageKey.PACKET_ID)
+        if retry == 0 && !pendingICS.insert(packet).inserted { return }
+        guard let current = context else {
+            if retry < 20 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.incoming(message, retry: retry + 1) }
+            } else { pendingICS.remove(packet) }
+            return
+        }
+        pendingICS.remove(packet)
+        guard !endedTickets.contains(current.ticket), current.channel != "0",
+              current.officer != User.getMyPin(), message.getPIN() == current.officer else { return }
+        let name = User.getDataCanNil(pin: current.officer)?.fullName ?? current.officer
+        CallManager.shared.reportContactCenterIncoming(ticket: current.ticket, officer: current.officer,
+            name: "Call Center (\(name))", isVideo: current.channel == "2")
+    }
+
+    func register(editor: EditorPersonal) {
+        guard editor.isContactCenter, context?.ticket == editor.complaintId else { return }
+        self.editor = editor
+        if context?.channel == "0" || editor.fromVCAC {
+            retainedEditor = editor
+            retainedContainer = editor.navigationController ?? editor
+        }
+        let started: String = SecureUserDefaults.shared.value(forKey: "startTimeCC") ?? ""
+        if started.isEmpty { SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: "startTimeCC") }
+    }
+    func register(audio: QmeraAudioViewController) { if !audio.ticketId.isEmpty { self.audio = audio } }
+    func register(video: QmeraVideoViewController) { if !video.ticketId.isEmpty { self.video = video } }
+
+    func waitForFirstResponse(ticket: String) {
+        firstResponse?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.end(ticket: ticket, notifyServer: true) }
+        firstResponse = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60, execute: work)
+    }
+
+    func minimize(editor: EditorPersonal) {
+        guard let current = context, current.ticket == editor.complaintId else { return }
+        self.editor = editor; retainedEditor = editor
+        editorVisible = false
+        let container = editor.navigationController ?? editor
+        retainedContainer = container
+        if let presenter = container.presentingViewController {
+            presenter.dismiss(animated: true) { [weak self] in self?.showChatIndicator() }
+        } else {
+            showChatIndicator()
+        }
+    }
+
+    func setEditorVisible(_ editor: EditorPersonal, visible: Bool) {
+        if pendingEditor === editor { editorVisible = visible; return }
+        guard context?.ticket == editor.complaintId else { return }
+        if visible { self.editor = editor; register(editor: editor) }
+        if self.editor === editor { editorVisible = visible }
+    }
+
+    func isEditorVisible(ticket: String) -> Bool {
+        context?.ticket == ticket && editor?.complaintId == ticket && editorVisible
+    }
+
+    /// One path for the call's chat button and CC message cards. Never creates a new request.
+    func openChat(ticket: String) {
+        guard let current = context, current.ticket == ticket, !endedTickets.contains(ticket),
+              !isEditorVisible(ticket: ticket), chatOpeningTicket == nil else { return }
+        chatOpeningTicket = ticket
+        let show = { [weak self] in self?.presentChat(ticket: ticket) }
+        if current.channel == "1", let audio, !MiniCallBannerManager.shared.isShowing {
+            audio.minimizeForContactCenterChat { show() }
+        } else if current.channel == "2", let video, !MiniVideoCallManager.shared.isShowing {
+            video.minimizeForContactCenterChat { show() }
+        } else {
+            show()
+        }
+    }
+
+    private func presentChat(ticket: String) {
+        defer { chatOpeningTicket = nil }
+        guard let current = context, current.ticket == ticket, !endedTickets.contains(ticket),
+              let host = presentationHost() else { return }
+        if retainedEditor?.complaintId != ticket {
+            let chat = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "editorPersonalVC") as! EditorPersonal
+            let members: String = SecureUserDefaults.shared.value(forKey: "membersCC") ?? ""
+            chat.unique_l_pin = current.officer
+            chat.fromNotification = true; chat.isContactCenter = true
+            chat.fPinContacCenter = members; chat.complaintId = ticket
+            chat.onGoingCC = true; chat.isRequestContactCenter = false
+            chat.channelContactCenter = current.channel; chat.fromVCAC = current.channel != "0"
+            chat.users = members.components(separatedBy: ",").filter { !$0.isEmpty }.compactMap { User.getDataCanNil(pin: $0) }
+            let navigation = CustomNavigationController(rootViewController: chat)
+            navigation.modalPresentationStyle = .fullScreen
+            retainedEditor = chat; retainedContainer = navigation; editor = chat
+        }
+        guard let container = retainedContainer else { return }
+        if current.channel == "0" { MiniCallBannerManager.shared.contactCenterChatDidOpen() }
+        // Minimizing a call above this editor reveals it; it must not be presented twice.
+        guard container.presentingViewController == nil else { return }
+        host.present(container, animated: true)
+    }
+
+    func notifyChat(_ message: TMessage, preview: String) {
+        guard let current = context,
+              message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID) == MessageScope.CHATROOM,
+              message.getBody(key: CoreMessage_TMessageKey.IS_CALL_CENTER) == "1" else { return }
+        let room = message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID)
+        let ticket = room.isEmpty ? message.getBody(key: CoreMessage_TMessageKey.CHAT_ID) : room
+        let sender = message.getBody(key: CoreMessage_TMessageKey.F_PIN)
+        guard ticket == current.ticket, !sender.isEmpty, sender != User.getMyPin(),
+              !isEditorVisible(ticket: ticket) else { return }
+        let name = User.getDataCanNil(pin: sender)?.fullName ?? sender
+        let avatar = UIImageView(image: UIImage(systemName: "person.crop.circle"))
+        InAppBanner.shared.present(InAppBanner.Content(conversationId: "cc:\(ticket)",
+            title: "Call Center (\(name))", body: NSAttributedString(string: preview.localized()), avatar: avatar,
+            onTap: { [weak self] in self?.openChat(ticket: ticket) }))
+    }
+
+    private func showChatIndicator() {
+        guard let current = context, current.channel == "0", retainedEditor != nil else { return }
+        // Fix: "Contact Center - CC aktif", with a hang-up button, for a session that is a chat.
+        MiniCallBannerManager.shared.showContactCenter(name: "Call Center is Online".localized(), status: "", isChat: true, restore: { [weak self] in
+            self?.openChat(ticket: current.ticket)
+        }, end: { [weak self] in self?.confirmEnd() })
+    }
+
+    func showVideoIndicator() {
+        guard let current = context, current.channel == "2" else { return }
+        MiniCallBannerManager.shared.showContactCenter(name: "Call Center".localized(), status: "Video", restore: {
+            MiniVideoCallManager.shared.restore()
+        }, end: { [weak self] in self?.confirmEnd() })
+    }
+
+    private func presentationHost() -> UIViewController? {
+        var top = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }.first { !($0 is MiniCallBannerWindow) && !($0 is MiniVideoCallWindow) && !$0.isHidden }?.rootViewController
+        for _ in 0..<20 {
+            if let presented = top?.presentedViewController { top = presented }
+            else if let navigation = top as? UINavigationController { top = navigation.visibleViewController }
+            else if let tabs = top as? UITabBarController { top = tabs.selectedViewController }
+            else { break }
+        }
+        return top
+    }
+
+    private func confirmEnd() {
+        guard let current = context, let host = presentationHost() else { return }
+        let alert = LibAlertController(title: "Call Center".localized(), message: "Are you sure you want to end/minimize the Call Center?".localized(), preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel))
+        // This alert is opened from the minimized CC banner: Minimize keeps that state.
+        alert.addAction(UIAlertAction(title: "Minimize".localized(), style: .default))
+        alert.addAction(UIAlertAction(title: "End Session".localized(), style: .destructive) { _ in
+            self.endChoosingStatus(ticket: current.ticket, from: host)
+        })
+        host.present(alert, animated: true)
+    }
+
+    // MARK: - How a session ended
+
+    /// The two ways a session can end, as Android records them.
+    static let completed = "0"
+    static let pending = "1"
+
+    /// How the session for `ticket` ended - Completed unless it was ended as Pending.
+    static func endStatus(ticket: String) -> String {
+        let status: String = SecureUserDefaults.shared.value(forKey: "ccEndStatus_\(ticket)") ?? completed
+        return status == pending ? pending : completed
+    }
+
+    /// Ends the session, asking the officer first how it ended - Completed or Pending - the way
+    /// Android's officer is asked. The requester has nothing to choose and simply ends it.
+    func endChoosingStatus(ticket: String, from host: UIViewController) {
+        guard let current = context, current.ticket == ticket, current.officer == User.getMyPin() else {
+            end(ticket: ticket, notifyServer: true)
+            return
+        }
+        // Presented once the alert that led here has gone.
+        DispatchQueue.main.async {
+            let choice = LibAlertController(title: "End session as".localized(),
+                message: "Choose the status of this Call Center session".localized(), preferredStyle: .alert)
+            choice.addAction(UIAlertAction(title: "Completed".localized(), style: .default) { _ in
+                self.end(ticket: ticket, notifyServer: true, status: ContactCenterSession.completed)
+            })
+            choice.addAction(UIAlertAction(title: "Pending".localized(), style: .default) { _ in
+                self.end(ticket: ticket, notifyServer: true, status: ContactCenterSession.pending)
+            })
+            choice.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel))
+            (host.presentedViewController ?? host).present(choice, animated: true)
+        }
+    }
+
+    func accept(ticket: String, uuid: UUID) {
+        if let deadline = handoffDeadline, deadline.timeIntervalSinceNow > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + deadline.timeIntervalSinceNow) { self.accept(ticket: ticket, uuid: uuid) }
+            return
+        }
+        guard let current = context, current.ticket == ticket, !endedTickets.contains(ticket),
+              let user = User.getDataCanNil(pin: current.officer), let host = presentationHost() else {
+            end(ticket: ticket, notifyServer: true); return
+        }
+        if current.channel == "1" {
+            let call = QmeraAudioViewController()
+            call.ticketId = ticket; call.user = user; call.isOutgoing = false
+            call.modalPresentationStyle = .fullScreen
+            host.present(call, animated: true) // the CC branch runs csa, never receiveCCall
+        } else if current.channel == "2" {
+            let call = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
+            call.ticketId = ticket; call.fPin = user.pin; call.users = [user]
+            call.isInisiator = false; call.isAutoAccept = true
+            let navigation = CustomNavigationController(rootViewController: call)
+            navigation.modalPresentationStyle = .fullScreen
+            host.present(navigation, animated: true)
+        }
+    }
+
+    func end(ticket: String, notifyServer: Bool, status: String = ContactCenterSession.completed) {
+        guard let current = context, current.ticket == ticket, endedTickets.insert(ticket).inserted else { return }
+        SecureUserDefaults.shared.set(status, forKey: "ccEndStatus_\(ticket)")
+        let start: String = SecureUserDefaults.shared.value(forKey: "startTimeCC") ?? ""
+        let me = User.getMyPin() ?? ""
+        firstResponse?.cancel(); firstResponse = nil
+        handoffDeadline = nil
+        chatOpeningTicket = nil; editorVisible = false
+        ContactCenterRequestGate.reset()
+        SecureUserDefaults.shared.removeValue(forKey: "pendingCCChannel")
+        SecureUserDefaults.shared.removeValue(forKey: "pendingCCNotificationID")
+        clearStatusNotifications()
+        for key in ["onGoingCC", "channelCC", "membersCC", "waitingRequestCC", "startTimeCC"] {
+            SecureUserDefaults.shared.removeValue(forKey: key)
+        }
+        let closingEditor = editor
+        let closingAudio = audio; let closingVideo = video
+        CallManager.shared.finishContactCenterCall(ticket: ticket)
+        MiniCallBannerManager.shared.contactCenterDidEnd(ticket: ticket)
+        editor = nil; retainedEditor = nil; retainedContainer = nil
+        audio = nil; video = nil
+        let finishCall = {
+            if current.channel != "0" {
+                closingAudio?.didEnd(sender: false)
+                closingVideo?.endAllCall()
+                (closingVideo?.navigationController ?? closingVideo)?.dismiss(animated: false)
+            }
+        }
+        if let closingEditor {
+            // Dismiss the editor's presentation tree, including a restored call above it.
+            closingEditor.closeContactCenterPresentation(completion: finishCall)
+        } else {
+            finishCall()
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            Database.shared.ensureOpenForBackgroundWrite()
+            Database.shared.database?.inTransaction { fmdb, rollback in
+                do {
+                    _ = try Database.shared.insertRecord(fmdb: fmdb, table: "CALL_CENTER_HISTORY", cvalues: [
+                        "type": current.channel, "title": "Call Center".localized(), "time": start,
+                        "f_pin": current.officer, "data": ticket, "time_end": "\(Date().currentTimeMillis())",
+                        "complaint_id": ticket, "members": "", "requester": current.requester
+                    ], replace: true)
+                } catch { rollback.pointee = true }
+            }
+            if notifyServer {
+                if let opposite = current.opposite(for: me) {
+                    _ = Nexilis.write(message: CoreMessage_TMessageBank.endCallCenter(complaint_id: ticket, l_pin: opposite, status: status))
+                } else {
+                    _ = Nexilis.write(message: CoreMessage_TMessageBank.leaveCCRoomInvite(ticket_id: ticket))
+                }
+            }
+        }
+    }
+}
+
 final class MiniCallBanner: UIView {
 
     private let muteButton = UIButton(type: .system)
@@ -6992,7 +7938,8 @@ final class MiniCallBanner: UIView {
         endCallButton.layer.cornerRadius = MiniCallBanner.buttonSize / 2
         endCallButton.clipsToBounds = true
 
-        let centerStack = UIStackView(arrangedSubviews: [iconView, titleLabel])
+        centerStack.addArrangedSubview(iconView)
+        centerStack.addArrangedSubview(titleLabel)
         centerStack.axis = .horizontal
         centerStack.spacing = 6
         centerStack.alignment = .center
@@ -7008,13 +7955,13 @@ final class MiniCallBanner: UIView {
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
-            centerStack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            centerStackCenterX,
             centerStack.centerYAnchor.constraint(equalTo: topAnchor, constant: MiniCallBanner.height / 2),
-            centerStack.leadingAnchor.constraint(greaterThanOrEqualTo: muteButton.trailingAnchor, constant: 8),
+            centerStackAfterMute,
             centerStack.trailingAnchor.constraint(lessThanOrEqualTo: endCallButton.leadingAnchor, constant: -8),
 
-            iconView.widthAnchor.constraint(equalToConstant: 22),
-            iconView.heightAnchor.constraint(equalToConstant: 18),
+            iconWidth,
+            iconHeight,
 
             muteButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: MiniCallBanner.sideMargin),
             muteButton.centerYAnchor.constraint(equalTo: topAnchor, constant: MiniCallBanner.height / 2),
@@ -7023,10 +7970,22 @@ final class MiniCallBanner: UIView {
 
             endCallButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -MiniCallBanner.sideMargin),
             endCallButton.centerYAnchor.constraint(equalTo: topAnchor, constant: MiniCallBanner.height / 2),
-            endCallButton.widthAnchor.constraint(equalToConstant: MiniCallBanner.buttonSize),
+            endCallButtonWidth,
             endCallButton.heightAnchor.constraint(equalToConstant: MiniCallBanner.buttonSize)
         ])
     }
+
+    /// The end button's width: a circle's for a call, the word's for a chat - see
+    /// configureContactCenter.
+    private lazy var endCallButtonWidth = endCallButton.widthAnchor.constraint(equalToConstant: MiniCallBanner.buttonSize)
+    private let centerStack = UIStackView()
+    /// Centred for a call, between its two buttons; a chat has no left button and its title
+    /// starts at the left edge instead - see configureContactCenter.
+    private lazy var iconWidth = iconView.widthAnchor.constraint(equalToConstant: 22)
+    private lazy var iconHeight = iconView.heightAnchor.constraint(equalToConstant: 18)
+    private lazy var centerStackCenterX = centerStack.centerXAnchor.constraint(equalTo: centerXAnchor)
+    private lazy var centerStackAfterMute = centerStack.leadingAnchor.constraint(greaterThanOrEqualTo: muteButton.trailingAnchor, constant: 8)
+    private lazy var centerStackAtEdge = centerStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: MiniCallBanner.sideMargin)
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -7077,6 +8036,45 @@ final class MiniCallBanner: UIView {
         isMuted = muted
         muteButton.backgroundColor = muted ? .white : MiniCallBanner.muteColor
         muteButton.tintColor = muted ? MiniCallBanner.endColor : .white
+    }
+
+    func configureContactCenter(name: String, status: String, isChat: Bool = false) {
+        configure(name: name, isMuted: false, status: { status })
+        muteButton.isHidden = true
+        // The Contact Center's own picture, in its own colours - the same one the contact list
+        // marks a Contact Center with.
+        iconView.image = UIImage(named: "pb_call_center", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)?
+            .withRenderingMode(.alwaysOriginal) ?? UIImage(systemName: "person.crop.circle.badge.checkmark")
+        // A face with a headset is lost at a glyph's 18pt.
+        iconWidth.constant = 26
+        iconHeight.constant = 26
+        guard isChat else {
+            return
+        }
+        // A chat session is not a call, and a hung-up receiver says it is. It is ended by a
+        // capsule that says so, in the same red as the call's end button.
+        endCallButton.setImage(nil, for: .normal)
+        endCallButton.setTitle("End".localized(), for: .normal)
+        endCallButton.setTitleColor(.white, for: .normal)
+        endCallButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+        endCallButton.contentEdgeInsets = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 16)
+        endCallButtonWidth.isActive = false
+        endCallButton.widthAnchor.constraint(greaterThanOrEqualToConstant: MiniCallBanner.buttonSize).isActive = true
+        endCallButton.layer.cornerRadius = MiniCallBanner.buttonSize / 2
+        // Fix: the title stayed centred, and "Call Center is Online" is long enough that the
+        // capsule beside it was squeezed down to "...". The title starts at the left edge now,
+        // shrinks before it gives way, and the capsule keeps its whole word at the right edge.
+        centerStackCenterX.isActive = false
+        centerStackAfterMute.isActive = false
+        centerStackAtEdge.isActive = true
+        titleLabel.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.textAlignment = .left
+        titleLabel.adjustsFontSizeToFitWidth = true
+        titleLabel.minimumScaleFactor = 0.7
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        endCallButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        endCallButton.setContentHuggingPriority(.required, for: .horizontal)
     }
 
     func onMute(_ target: Any?, action: Selector) {
@@ -7135,6 +8133,16 @@ final class MiniCallBanner: UIView {
 /// touch outside the strip itself straight through to the app.
 final class MiniCallBannerWindow: UIWindow {
 
+    override init(windowScene: UIWindowScene) {
+        super.init(windowScene: windowScene)
+        // Whatever banner comes down while this floats over the app is shown above it.
+        NotificationBannerOverlay.shared.start()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard let hit = super.hitTest(point, with: event) else {
             return nil
@@ -7148,6 +8156,16 @@ final class MiniCallBannerWindow: UIWindow {
 /// Same reasoning as the audio banner's window: over every page of the app, library or host,
 /// and every touch outside the bubble itself belongs to whatever is underneath.
 final class MiniVideoCallWindow: UIWindow {
+
+    override init(windowScene: UIWindowScene) {
+        super.init(windowScene: windowScene)
+        // Whatever banner comes down while this floats over the app is shown above it.
+        NotificationBannerOverlay.shared.start()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard let hit = super.hitTest(point, with: event) else {
@@ -7194,6 +8212,7 @@ final public class MiniVideoCallManager {
         }
         self.call = call
         self.callContainer = container
+        if !call.ticketId.isEmpty { ContactCenterSession.shared.showVideoIndicator() }
         // Fix: the button used to be held down for the whole call, minimised or not. Minimised,
         // the app is what the reader is looking at and the button is part of it - there is
         // nothing for it to float over any more, and taking it away for the length of a call is
@@ -7264,6 +8283,7 @@ final public class MiniVideoCallManager {
             dismissBubble()
             return
         }
+        if let call = call, !call.ticketId.isEmpty { MiniCallBannerManager.shared.callDidEnd() }
         // The call is taking the screen back, and the button has no business over it.
         FloatingButton.isSuppressed = true
         guard let presenter = presentationHost() else {
@@ -7385,6 +8405,8 @@ final public class MiniCallBannerManager {
     /// - its timers, its observers, its audio - alive and lets it be put back exactly as it was.
     /// Released in callDidEnd(), which every ending goes through.
     private var call: QmeraAudioViewController?
+    private var ccRestore: (() -> Void)?
+    private var ccEnd: (() -> Void)?
 
     public var isShowing: Bool {
         return banner != nil
@@ -7395,6 +8417,7 @@ final public class MiniCallBannerManager {
     // MARK: - Showing
 
     func show(for call: QmeraAudioViewController) {
+        ccRestore = nil; ccEnd = nil
         // The call is remembered before anything else. A strip left over from an earlier call
         // used to make this return early, and then the strip on screen belonged to a call this
         // object no longer had - tapping it could only take itself away.
@@ -7464,6 +8487,12 @@ final public class MiniCallBannerManager {
     /// nothing at all, in which case the tap did nothing. The app's own window is found
     /// explicitly here, and the screen it is presented on top of is walked down from its root.
     public func restore() {
+        if let restore = ccRestore {
+            ccRestore = nil; ccEnd = nil
+            dismissBanner()
+            restore()
+            return
+        }
         guard let call = call else {
             dismissBanner()
             return
@@ -7510,6 +8539,7 @@ final public class MiniCallBannerManager {
 
     /// Called when the call itself is over, however it ended.
     public func callDidEnd() {
+        ccRestore = nil; ccEnd = nil
         // Released next turn, not here: this is nearly always called from a method on that very
         // screen, and dropping the last reference to it half way through one of its own methods
         // is a use-after-free waiting to happen.
@@ -7637,11 +8667,46 @@ final public class MiniCallBannerManager {
     }
 
     @objc private func endTapped() {
+        if let end = ccEnd { end(); return }
         call?.endCallFromMiniBanner()
     }
 
     @objc private func bannerTapped() {
         restore()
+    }
+
+    func showContactCenter(name: String, status: String, isChat: Bool = false, restore: @escaping () -> Void, end: @escaping () -> Void) {
+        dismissBanner()
+        ccRestore = restore; ccEnd = end
+        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first(where: { $0.activationState == .foregroundActive }) else { return }
+        let banner = MiniCallBanner()
+        banner.configureContactCenter(name: name, status: status, isChat: isChat)
+        banner.onTap(self, action: #selector(bannerTapped))
+        banner.onEnd(self, action: #selector(endTapped))
+        let host = UIViewController()
+        host.view.backgroundColor = .clear
+        host.view.addSubview(banner)
+        banner.translatesAutoresizingMaskIntoConstraints = false
+        let window = MiniCallBannerWindow(windowScene: scene)
+        window.backgroundColor = .clear; window.windowLevel = .statusBar + 1
+        window.rootViewController = host; window.isHidden = false
+        NSLayoutConstraint.activate([
+            banner.topAnchor.constraint(equalTo: host.view.safeAreaLayoutGuide.topAnchor),
+            banner.leadingAnchor.constraint(equalTo: host.view.leadingAnchor),
+            banner.trailingAnchor.constraint(equalTo: host.view.trailingAnchor),
+            banner.heightAnchor.constraint(equalToConstant: MiniCallBanner.height + MiniCallBanner.cornerOverhang)
+        ])
+        self.banner = banner; self.window = window
+        window.layoutIfNeeded()
+        refreshInsetsIfShowing(); startInsetWatch()
+    }
+
+    func contactCenterDidEnd(ticket: String) {
+        if ccRestore != nil || call?.ticketId == ticket { callDidEnd() }
+    }
+
+    func contactCenterChatDidOpen() {
+        if ccRestore != nil { callDidEnd() }
     }
 }
 
@@ -12141,7 +13206,30 @@ final class ChatSearchBar: UISearchBar {
         buildCancel()
     }
 
+    /// Whether the circle is drawn at all. Fix: it was drawn on every release, so iOS 15 closed a
+    /// search with an x where everything else on that release says "Cancel" - see
+    /// UIBarButtonItem.libCancel. Before iOS 26 the bar's own button is left to show, as the word.
+    private static var drawsRoundCancel: Bool {
+        if #available(iOS 26.0, *) {
+            return true
+        }
+        return false
+    }
+
     private func buildCancel() {
+        guard Self.drawsRoundCancel else {
+            // The same word and colour libCancel gives the bars on this release.
+            let word = UIBarButtonItem.appearance(whenContainedInInstancesOf: [ChatSearchBar.self])
+            word.title = "Cancel".localized()
+            word.setTitleTextAttributes([.foregroundColor: UIColor.white,
+                                         .font: UIFont.systemFont(ofSize: 16)], for: .normal)
+            // UIKit turns the button off while the field is not being typed into - the keyboard
+            // or the wheels put away. Fix: it stayed white all the same, so it looked pressable
+            // and ignored the tap. Off, it is grey.
+            word.setTitleTextAttributes([.foregroundColor: UIColor.lightGray,
+                                         .font: UIFont.systemFont(ofSize: 16)], for: .disabled)
+            return
+        }
         let cross = UIImage(systemName: "xmark",
                             withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))
         if #available(iOS 26.0, *) {
@@ -12150,11 +13238,6 @@ final class ChatSearchBar: UISearchBar {
             glass.baseForegroundColor = .label
             glass.cornerStyle = .capsule
             roundCancel.configuration = glass
-        } else {
-            roundCancel.setImage(cross, for: .normal)
-            roundCancel.tintColor = .white
-            roundCancel.backgroundColor = UIColor.white.withAlphaComponent(0.3)
-            roundCancel.clipsToBounds = true
         }
         roundCancel.addTarget(self, action: #selector(roundCancelPressed), for: .touchUpInside)
         addSubview(roundCancel)
@@ -12272,6 +13355,9 @@ final class ChatSearchBar: UISearchBar {
         // circle, a pale arc against the glass. The whole tree is walked now, and a branch is
         // left alone once its root has been put away: there is no point hiding what is already
         // inside something hidden, and descending into the field would find its own controls.
+        guard Self.drawsRoundCancel else {
+            return
+        }
         hideTheOneTheBarMade()
 
         // Anchored to the far edge by the same margin the field keeps on the near one, so the row
@@ -12280,9 +13366,6 @@ final class ChatSearchBar: UISearchBar {
         roundCancel.frame = CGRect(x: bounds.width - margin - side,
                                    y: box.midY - side / 2,
                                    width: side, height: side)
-        if #unavailable(iOS 26.0) {
-            roundCancel.layer.cornerRadius = side / 2
-        }
         bringSubviewToFront(roundCancel)
     }
 }
@@ -12598,6 +13681,46 @@ public final class PressableTextView: UITextView {
 
     public enum Phase {
         case began, moved, ended, cancelled
+    }
+
+    /// The rounded grounds drawn behind `.mentionHighlight` runs - the reader's own mentions.
+    /// Drawn as layers under the text rather than as a background colour, which can only be a
+    /// square box tight to the glyphs.
+    private var mentionGrounds: [CALayer] = []
+
+    public override var attributedText: NSAttributedString! {
+        didSet { setNeedsLayout() }
+    }
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        drawMentionGrounds()
+    }
+
+    private func drawMentionGrounds() {
+        mentionGrounds.forEach { $0.removeFromSuperlayer() }
+        mentionGrounds.removeAll()
+        guard let text = attributedText, text.length > 0 else {
+            return
+        }
+        text.enumerateAttribute(.mentionHighlight, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+            guard let colour = value as? UIColor,
+                  let start = position(from: beginningOfDocument, offset: range.location),
+                  let end = position(from: start, offset: range.length),
+                  let span = textRange(from: start, to: end) else {
+                return
+            }
+            // One ground per line the mention runs across.
+            for piece in selectionRects(for: span) where piece.rect.width > 1 && piece.rect.height > 1 {
+                let ground = CALayer()
+                ground.frame = piece.rect.insetBy(dx: -3, dy: 0).integral
+                ground.backgroundColor = colour.cgColor
+                ground.cornerRadius = min(6, ground.frame.height / 2)
+                // Under the text, which is drawn by a subview of this one.
+                layer.insertSublayer(ground, at: 0)
+                mentionGrounds.append(ground)
+            }
+        }
     }
 
     /// Where the finger is, and what it is doing, in this view's coordinates.
@@ -15660,6 +16783,374 @@ public final class LinkPreviewCard: PressableView {
 
 /// iOS 26 glass for the input-bar controls, in the colour each used to be painted flat.
 ///
+/// The furniture of an editor's search bar.
+///
+/// WhatsApp puts the two arrows in one capsule at the left of the bar and the button that opens
+/// the date picker in a circle at the right, and both stand on the same ground the sticker panel
+/// stands on - so the bar reads as a part of the keyboard it sits over rather than as something
+/// laid on top of it. See GlassLook.applyPanelGround, which is where that ground is decided.
+public enum ChatSearchBarKit {
+    /// Measured off the reference recording, at three points to the pixel: the band is 76 tall,
+    /// the pill 104 by 48, the circle 48 across, and both stand 16 in from the edge.
+    ///
+    /// Before iOS 26 the band is the 50pt of the forward and copy bars, which is what that
+    /// release's reference draws under a search - so the pill and the circle come down to fit it.
+    public static var barHeight: CGFloat {
+        if #available(iOS 26.0, *) {
+            return 76
+        }
+        return 50
+    }
+    /// The capsule the two arrows share.
+    public static var stepperSize: CGSize {
+        if #available(iOS 26.0, *) {
+            return CGSize(width: 104, height: 48)
+        }
+        return CGSize(width: 96, height: 38)
+    }
+    /// The circle the date button is.
+    public static var roundSize: CGFloat {
+        if #available(iOS 26.0, *) {
+            return 48
+        }
+        return 38
+    }
+    /// How far the pill and the circle stand in from the edges of the screen.
+    public static let sideInset: CGFloat = 16
+    /// The chevrons, at the weight the reference draws them.
+    public static var chevronLook: UIImage.SymbolConfiguration {
+        return UIImage.SymbolConfiguration(pointSize: 18, weight: .regular)
+    }
+
+    /// Puts glass behind `control`, shaped to its corners.
+    ///
+    /// Fix: the glass used to go inside the control, as its lowest subview - and that is exactly
+    /// where a UIButton keeps the image view it makes for itself on its first layout, which is
+    /// after this has run. The button put its image *under* the glass and the calendar could not
+    /// be seen at all. The glass stands beside the control now, just under it in the same view,
+    /// and the control is left with its own subviews to itself. This is the same trap, and the
+    /// same answer, as the button grounds in ChatMentionList.dress.
+    /// The glass behind a control, which goes and comes back with it.
+    private final class Glass: UIVisualEffectView {
+        var hiddenWatch: NSKeyValueObservation?
+    }
+
+    public static func glass(behind control: UIView, cornerRadius: CGFloat) {
+        guard let host = control.superview else {
+            return
+        }
+        control.backgroundColor = .clear
+        // Before iOS 26 the arrows and the calendar stand on the band bare, the way that
+        // release's reference draws them - no pill, no circle.
+        guard #available(iOS 26.0, *) else {
+            return
+        }
+        let ground = Glass(effect: UIGlassEffect(style: .regular))
+        ground.isUserInteractionEnabled = false
+        ground.layer.cornerRadius = cornerRadius
+        ground.clipsToBounds = true
+        // Fix: the glass is the control's neighbour, not its child, so hiding the control left
+        // the glass standing there on its own - the date button went and its circle stayed. It
+        // follows what it stands behind.
+        ground.hiddenWatch = control.observe(\.isHidden, options: [.initial, .new]) { [weak ground] control, _ in
+            ground?.isHidden = control.isHidden
+        }
+        host.insertSubview(ground, belowSubview: control)
+        ground.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            ground.leadingAnchor.constraint(equalTo: control.leadingAnchor),
+            ground.trailingAnchor.constraint(equalTo: control.trailingAnchor),
+            ground.topAnchor.constraint(equalTo: control.topAnchor),
+            ground.bottomAnchor.constraint(equalTo: control.bottomAnchor)
+        ])
+    }
+
+    /// The band the search bar stands on: the same ground the sticker panel has, so the bar and
+    /// the keyboard under it read as one piece rather than as a strip laid over the chat.
+    public static func band(_ bar: UIView) {
+        bar.backgroundColor = .clear
+        let ground = UIVisualEffectView(effect: nil)
+        GlassLook.applyPanelGround(ground)
+        // Before iOS 26: the ground the forward and copy bars have on that release, so a search
+        // band and a selection bar are the same strip.
+        if #available(iOS 26.0, *) {} else {
+            ground.backgroundColor = UIColor { trait in
+                trait.userInterfaceStyle == .dark ? .blackDarkMode : .secondaryColor
+            }
+        }
+        ground.isUserInteractionEnabled = false
+        bar.insertSubview(ground, at: 0)
+        ground.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            ground.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
+            ground.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
+            ground.topAnchor.constraint(equalTo: bar.topAnchor),
+            ground.bottomAnchor.constraint(equalTo: bar.bottomAnchor)
+        ])
+    }
+
+    /// The icon that takes the reader back to the keyboard, shown while the wheels are up.
+    public static var keyboardSymbol: UIImage? {
+        return UIImage(systemName: "keyboard",
+                       withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular))
+    }
+
+    /// The icon on the date button: a calendar being looked through. The name is only in the
+    /// later symbol sets, so a plain calendar stands in where it is not there to be had.
+    public static var dateSymbol: UIImage? {
+        let look = UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+        return UIImage(systemName: "calendar.badge.magnifyingglass", withConfiguration: look)
+            ?? UIImage(systemName: "calendar", withConfiguration: look)
+    }
+}
+
+/// The panel the date button opens: three wheels and one button that takes the reader to that
+/// day in the conversation.
+///
+/// It is the search field's input view, so it takes the keyboard's own place and the system
+/// trades one for the other with the animation it uses for any keyboard change - which is what
+/// the reference does, and why the footer above it goes on following the keyboard guide without
+/// knowing anything about this panel.
+///
+/// The wheels are a plain picker rather than a UIDatePicker because a date picker can only be
+/// told a range - it draws the dates outside it greyed, and they are still there to scroll past.
+/// A conversation has no days before its first message, so those days are not offered at all.
+public final class ChatDateJumpPanel: UIInputView, UIPickerViewDataSource, UIPickerViewDelegate {
+    /// The day the reader chose.
+    public var onJump: ((Date) -> Void)?
+
+    private let wheels = UIPickerView()
+    private let jump = UIButton(type: .system)
+    private let calendar = Calendar.current
+    private let monthNames: [String] = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "id")
+        return formatter.standaloneMonthSymbols ?? []
+    }()
+
+    /// The first day the conversation has anything on, and today: the two ends of the wheels.
+    private let first: DateComponents
+    private let last: DateComponents
+
+    private var years: [Int] = []
+    private var months: [Int] = []
+    private var days: [Int] = []
+
+    private static let defaultHeight: CGFloat = 300
+    /// How tall the panel stands.
+    private let panelHeight: CGFloat
+
+    /// `height` is the keyboard's, where the caller wants the panel to take exactly its place.
+    /// Fix: on iOS 15 the panel stood a fixed 300 over a keyboard of 216 to 260, so it came up
+    /// taller than what it replaced and over the band standing on the keyboard.
+    public init(earliest: Date?, height: CGFloat? = nil, onJump: @escaping (Date) -> Void) {
+        panelHeight = height ?? ChatDateJumpPanel.defaultHeight
+        let today = Date()
+        let start = earliest ?? calendarStart(of: today)
+        first = Calendar.current.dateComponents([.year, .month, .day], from: min(start, today))
+        last = Calendar.current.dateComponents([.year, .month, .day], from: today)
+        super.init(frame: CGRect(x: 0, y: 0, width: 320, height: panelHeight),
+                   inputViewStyle: .keyboard)
+        self.onJump = onJump
+        allowsSelfSizing = true
+        translatesAutoresizingMaskIntoConstraints = false
+        build()
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    public override var intrinsicContentSize: CGSize {
+        return CGSize(width: UIView.noIntrinsicMetric, height: panelHeight)
+    }
+
+    private func build() {
+        wheels.dataSource = self
+        wheels.delegate = self
+        addSubview(wheels)
+        wheels.translatesAutoresizingMaskIntoConstraints = false
+
+        jump.setTitle("Jump to date".localized(), for: .normal)
+        jump.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
+        jump.setTitleColor(.white, for: .normal)
+        jump.backgroundColor = .mainColor
+        jump.layer.cornerRadius = 25
+        jump.clipsToBounds = true
+        jump.addTarget(self, action: #selector(jumpTapped), for: .touchUpInside)
+        addSubview(jump)
+        jump.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            wheels.leadingAnchor.constraint(equalTo: leadingAnchor),
+            wheels.trailingAnchor.constraint(equalTo: trailingAnchor),
+            wheels.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            jump.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            jump.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            jump.topAnchor.constraint(equalTo: wheels.bottomAnchor, constant: 8),
+            jump.heightAnchor.constraint(equalToConstant: 50)
+        ])
+        if panelHeight == ChatDateJumpPanel.defaultHeight {
+            wheels.heightAnchor.constraint(equalToConstant: 200).isActive = true
+        } else {
+            // A keyboard's height: the button keeps to the foot, clear of the home indicator,
+            // and the wheels take whatever is left above it.
+            //
+            // Fix: read off a recording - the panel still came up 286pt over a 216pt keyboard and
+            // over the band. A picker insists on its own 216pt, and with the button under it that
+            // pushed the panel 70pt past the height it had been given, while the keyboard frame
+            // the band stands on went on reporting the height it had been given. The wheels give
+            // way now, and the panel is held to its height outright.
+            wheels.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+            wheels.setContentHuggingPriority(.defaultLow, for: .vertical)
+            jump.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -8).isActive = true
+            heightAnchor.constraint(equalToConstant: panelHeight).isActive = true
+        }
+
+        years = Array((first.year ?? 1970)...(last.year ?? 1970))
+        // Opened on today, which is where the reader is standing.
+        rebuildMonths(forYear: last.year ?? 1970)
+        rebuildDays(forYear: last.year ?? 1970, month: last.month ?? 1)
+        wheels.reloadAllComponents()
+        select(day: last.day ?? 1, month: last.month ?? 1, year: last.year ?? 1970)
+    }
+
+    // MARK: - What the wheels may hold
+
+    /// Every month, always. Fix: the months were cut back to the ones the first and last years
+    /// actually reach, and a reader turning the year wheel watched the month wheel shrink under
+    /// them. A month with no messages in it is not a month that cannot be asked for - see
+    /// messageId(nearestTo:), which answers with the nearest message either side of the day.
+    private func rebuildMonths(forYear year: Int) {
+        months = Array(1...12)
+    }
+
+    /// And every day the month has.
+    private func rebuildDays(forYear year: Int, month: Int) {
+        let inMonth = calendar.range(of: .day, in: .month,
+                                     for: calendar.date(from: DateComponents(year: year, month: month, day: 1)) ?? Date())
+        days = Array(1...(inMonth?.count ?? 31))
+    }
+
+    private func select(day: Int, month: Int, year: Int) {
+        if let row = days.firstIndex(of: day) {
+            wheels.selectRow(row, inComponent: 0, animated: false)
+        }
+        if let row = months.firstIndex(of: month) {
+            wheels.selectRow(row, inComponent: 1, animated: false)
+        }
+        if let row = years.firstIndex(of: year) {
+            wheels.selectRow(row, inComponent: 2, animated: false)
+        }
+    }
+
+    private var chosen: DateComponents {
+        let year = years[min(max(wheels.selectedRow(inComponent: 2), 0), years.count - 1)]
+        let month = months[min(max(wheels.selectedRow(inComponent: 1), 0), months.count - 1)]
+        let day = days[min(max(wheels.selectedRow(inComponent: 0), 0), days.count - 1)]
+        return DateComponents(year: year, month: month, day: day)
+    }
+
+    // MARK: - UIPickerView
+
+    public func numberOfComponents(in pickerView: UIPickerView) -> Int {
+        return 3
+    }
+
+    public func pickerView(_ pickerView: UIPickerView, numberOfRowsInComponent component: Int) -> Int {
+        switch component {
+        case 0: return days.count
+        case 1: return months.count
+        default: return years.count
+        }
+    }
+
+    public func pickerView(_ pickerView: UIPickerView, widthForComponent component: Int) -> CGFloat {
+        switch component {
+        case 0: return 60
+        case 1: return 150
+        default: return 90
+        }
+    }
+
+    public func pickerView(_ pickerView: UIPickerView, titleForRow row: Int, forComponent component: Int) -> String? {
+        switch component {
+        case 0:
+            return row < days.count ? "\(days[row])" : nil
+        case 1:
+            guard row < months.count else {
+                return nil
+            }
+            let month = months[row]
+            return month - 1 < monthNames.count ? monthNames[month - 1] : "\(month)"
+        default:
+            return row < years.count ? "\(years[row])" : nil
+        }
+    }
+
+    public func pickerView(_ pickerView: UIPickerView, didSelectRow row: Int, inComponent component: Int) {
+        // A year or a month changing can take the chosen day out of what that month has - the
+        // wheels below are built again and the choice kept as near as it can be.
+        let picked = chosen
+        if component == 2 {
+            rebuildMonths(forYear: picked.year ?? 1970)
+            let month = months.contains(picked.month ?? 1) ? (picked.month ?? 1) : (months.first ?? 1)
+            rebuildDays(forYear: picked.year ?? 1970, month: month)
+            let day = days.contains(picked.day ?? 1) ? (picked.day ?? 1) : (days.first ?? 1)
+            pickerView.reloadComponent(1)
+            pickerView.reloadComponent(0)
+            select(day: day, month: month, year: picked.year ?? 1970)
+        } else if component == 1 {
+            rebuildDays(forYear: picked.year ?? 1970, month: picked.month ?? 1)
+            let day = days.contains(picked.day ?? 1) ? (picked.day ?? 1) : (days.first ?? 1)
+            pickerView.reloadComponent(0)
+            select(day: day, month: picked.month ?? 1, year: picked.year ?? 1970)
+        }
+    }
+
+    @objc private func jumpTapped() {
+        guard let day = calendar.date(from: chosen) else {
+            return
+        }
+        onJump?(day)
+    }
+}
+
+private func calendarStart(of day: Date) -> Date {
+    return Calendar.current.startOfDay(for: day)
+}
+
+public extension UIBarButtonItem {
+    /// The button that leaves a screen without keeping what is on it.
+    ///
+    /// iOS 26 closes a mode with a round button of glass carrying an x, and a word sitting where
+    /// that button belongs is the one thing on a bar that still reads as the release before -
+    /// which is why the editor's selection bar has drawn an x there since that release came out.
+    /// Every bar in the app now closes the same way. Older systems keep the word, which is what
+    /// they draw everywhere else.
+    ///
+    /// The item is left plain on purpose: on iOS 26 the bar dresses whatever item it is given,
+    /// so a button carrying glass of its own comes out as a pill inside the bar's own circle.
+    ///
+    /// `wordColour` is the colour of the word on those older systems, for the bars that are
+    /// painted and carry white writing. The glyph is drawn in the label colour, which is what
+    /// the bar's glass expects and what the editor has always used.
+    static func libCancel(target: Any?, action: Selector, wordColour: UIColor? = nil) -> UIBarButtonItem {
+        if #available(iOS 26.0, *) {
+            let item = UIBarButtonItem(image: UIImage(systemName: "xmark"), style: .plain,
+                                       target: target, action: action)
+            item.tintColor = .label
+            return item
+        }
+        let item = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: target, action: action)
+        if let wordColour = wordColour {
+            item.setTitleTextAttributes([.foregroundColor: wordColour,
+                                         .font: UIFont.systemFont(ofSize: 16)], for: .normal)
+        }
+        return item
+    }
+}
+
 /// A button becomes one of the system's own glass buttons - `UIButton.Configuration.prominentGlass`
 /// tinted with the colour it had, so a blue button stays blue - and with that comes everything the
 /// system does to its glass under a finger: the swell, the shine, the settle back. None of it is
@@ -15771,6 +17262,18 @@ enum GlassLook {
         // The image is the one the caller set the old way, and every later `setImage` is followed
         // by `imageChanged` so the configuration hears about it.
         glass.image = painted(button.image(for: .normal), in: foreground)
+        // Fix: a button with a configuration has its title rebuilt by UIKit on every state
+        // change - which is to say on every tap - and the font it rebuilds it with is the
+        // system's, not the one the caller put on titleLabel. The title came up in Poppins and
+        // went back to the system face the moment a finger touched it. A transformer is part of
+        // the configuration, so it is applied to every rebuild rather than overwritten by one.
+        if let titled = button.titleLabel?.font, button.currentTitle?.isEmpty == false {
+            glass.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+                var kept = incoming
+                kept.font = titled
+                return kept
+            }
+        }
         button.configuration = glass
         button.configurationUpdateHandler = { button in
             var current = button.configuration
@@ -16046,5 +17549,315 @@ enum GlassLook {
 
     private final class GlassSlab: UIVisualEffectView {
         var hiddenWatch: NSKeyValueObservation?
+    }
+}
+
+/// What a search in a conversation finds, and what it lights up - the rule WhatsApp keeps.
+///
+/// The query is split at its spaces into words, and a word counts once it has two letters -
+/// "ak m" searches for "ak" alone until the "m" becomes "ma". A message is found when every word
+/// is somewhere in it: "ak ma" finds "aku minggu besok mau mandi". What is lit up is looser:
+/// every word of the query, in any bubble that has it, found or not - "ak ma" lights "aku" in a
+/// bubble with no "ma" in it too, though only the bubbles with both are counted and stepped to.
+/// A word of the message that holds a word of the query is lit whole, wherever in it the match
+/// falls: "ak" lights "aku" and "akhirnya", and "te" lights "rooted" and "remote" rather than
+/// just the "te" inside them.
+///
+/// Fix: the query was one string, searched for as it was typed - a space made it look for the
+/// two words side by side - and only its first occurrence in a bubble was lit, and only the
+/// letters typed rather than the word they begin.
+public enum ChatSearchMatch {
+
+    /// The words of the query, each on its own, and only those of two letters or more. Empty when
+    /// there are none.
+    public static func words(of query: String) -> [String] {
+        return query.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+            .map(String.init)
+            .filter { $0.count >= 2 }
+    }
+
+    private static let compare: NSString.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+
+    /// Marks a label that shows no text of the conversation - a time, a count - and is never lit.
+    public static let unlitTag = 0x5EA4C1
+
+    /// `text` with every word of `query` lit the way a list of results lights them, which is
+    /// WhatsApp's: in the full text colour against the grey of the rest, at the weight it already
+    /// had. A bubble in a conversation is lit in yellow instead - see highlightSearchText.
+    ///
+    /// Fix: the words were also put in bold, which the reference does not do - it only darkens
+    /// them.
+    public static func highlighted(_ text: NSAttributedString, query: String) -> NSAttributedString {
+        let ranges = self.ranges(in: text.string, query: query)
+        guard !ranges.isEmpty else {
+            return text
+        }
+        let lit = NSMutableAttributedString(attributedString: text)
+        for range in ranges {
+            lit.addAttribute(.foregroundColor, value: UIColor.label, range: range)
+        }
+        return lit
+    }
+
+    /// `text` in `font` and `colour`, with the words of `query` in it lit - see highlighted(_:query:).
+    public static func emphasized(_ text: String, query: String, font: UIFont, colour: UIColor) -> NSMutableAttributedString {
+        let plain = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: colour])
+        return NSMutableAttributedString(attributedString: highlighted(plain, query: query))
+    }
+
+    /// The words of a long message around the first thing searched for, so that it shows in a
+    /// three-line row rather than being cut off below it: all on one line, and begun a few words
+    /// before the match, with "…" where the start was dropped.
+    public static func snippet(_ text: String, query: String) -> String {
+        let flat = text.components(separatedBy: .newlines).joined(separator: " ")
+        guard let first = ranges(in: flat, query: query).min(by: { $0.location < $1.location }) else {
+            return flat
+        }
+        let lead = 30
+        guard first.location > lead + 10 else {
+            return flat
+        }
+        let string = flat as NSString
+        var start = first.location - lead
+        let space = string.rangeOfCharacter(from: .whitespaces, options: [],
+                                            range: NSRange(location: start, length: first.location - start))
+        start = space.location == NSNotFound ? first.location : space.location + 1
+        return "\u{2026}" + string.substring(from: start)
+    }
+
+    /// Lights the words of `query` in the labels of `view` that hold one: such a label is greyed and
+    /// the words in it set in the text colour, the way a search result row draws them. A label with
+    /// nothing in it to light is left exactly as it was, and so is one tagged `unlitTag`.
+    public static func highlightMatches(in view: UIView, query: String) {
+        guard !words(of: query).isEmpty else {
+            return
+        }
+        for child in view.subviews {
+            if let label = child as? UILabel {
+                guard label.tag != unlitTag, let text = label.attributedText, text.length > 0,
+                      !ranges(in: text.string, query: query).isEmpty else {
+                    continue
+                }
+                let grey = NSMutableAttributedString(attributedString: text)
+                grey.addAttribute(.foregroundColor, value: UIColor.secondaryLabel,
+                                  range: NSRange(location: 0, length: grey.length))
+                label.attributedText = highlighted(grey, query: query)
+                continue
+            }
+            highlightMatches(in: child, query: query)
+        }
+    }
+
+    /// Lights the words of `query` in a row of search results: every label in it - bar the ones
+    /// tagged `unlitTag` - and the text of a list configuration, which is how the group rows are
+    /// drawn. The chat list and the contact list use this, so their results are lit by the same
+    /// rule the conversation uses for its bubbles.
+    public static func highlight(_ cell: UITableViewCell, query: String) {
+        guard !words(of: query).isEmpty else {
+            return
+        }
+        highlightLabels(in: cell.contentView, query: query)
+        if var list = cell.contentConfiguration as? UIListContentConfiguration {
+            if let attributed = list.attributedText {
+                list.attributedText = highlighted(attributed, query: query)
+            } else if let plain = list.text {
+                list.attributedText = highlighted(NSAttributedString(string: plain, attributes: [
+                    .font: list.textProperties.font,
+                    .foregroundColor: list.textProperties.resolvedColor()
+                ]), query: query)
+            }
+            cell.contentConfiguration = list
+        }
+    }
+
+    private static func highlightLabels(in view: UIView, query: String) {
+        for child in view.subviews {
+            if let label = child as? UILabel {
+                if label.tag != unlitTag, let text = label.attributedText, text.length > 0 {
+                    label.attributedText = highlighted(text, query: query)
+                }
+                continue
+            }
+            highlightLabels(in: child, query: query)
+        }
+    }
+
+    /// The text a bubble shows for a stored message, as the conversation draws it: the link
+    /// preview after the "■" left out, a voice note's words before its "|", and the formatting
+    /// and mentions rendered. A search is matched against this, which is what it lights up, so
+    /// the count and the highlight can never disagree.
+    ///
+    /// Fix: the count came from the stored text - link previews the bubble never draws among it -
+    /// and the highlight from the drawn one, so the two told different stories: ten bubbles lit
+    /// up and "of 7" beside them, or the other way about.
+    public static func shownText(of stored: String, audioId: String, groupId: String = "") -> String {
+        var text = stored
+        if !audioId.isEmpty {
+            text = text.components(separatedBy: "|")[0]
+        }
+        return ChatMessageText.withoutLinkPreview(text).richText(group_id: groupId).string
+    }
+
+    /// `text` with each mention in it - stored as "@pin" - written as the conversation writes it,
+    /// "@name". A pin nobody is known by is left as it is, as the bubble leaves it.
+    static func withMentionNames(_ text: String) -> String {
+        guard text.contains("@"), let regex = try? NSRegularExpression(pattern: "@([\\w-]+)", options: []) else {
+            return text
+        }
+        let written = NSMutableString(string: text)
+        for match in regex.matches(in: text, options: [], range: NSRange(location: 0, length: written.length)).reversed() {
+            let range = match.range(at: 1)
+            if let name = MentionNames.name(forPin: written.substring(with: range)) {
+                written.replaceCharacters(in: range, with: name)
+            }
+        }
+        return written as String
+    }
+
+    /// Whether a name answers `query`. A search that has a word of two letters is matched the way
+    /// a message is (see matches(_:query:)); a search of single letters - someone who has only
+    /// typed "m" so far - by the words of the name that begin with them, as WhatsApp does, since
+    /// nearly every name has an "m" in it somewhere.
+    public static func matchesName(_ name: String, query: String) -> Bool {
+        if !words(of: query).isEmpty {
+            return matches(name, query: query)
+        }
+        let letters = query.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).map(String.init)
+        guard !letters.isEmpty else {
+            return false
+        }
+        let nameWords = name.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        return letters.allSatisfy { letter in
+            nameWords.contains { $0.range(of: letter, options: [.anchored, .caseInsensitive, .diacriticInsensitive]) != nil }
+        }
+    }
+
+    /// Whether `text` holds every word of `query`.
+    public static func matches(_ text: String, query: String) -> Bool {
+        let parts = words(of: query)
+        guard !parts.isEmpty else {
+            return false
+        }
+        return parts.allSatisfy { text.range(of: $0, options: compare) != nil }
+    }
+
+    /// The SQL condition on `column` for a message that holds every word of `query`, each word
+    /// escaped: an apostrophe, and the `%` and `_` LIKE would otherwise take as wildcards.
+    /// Nil when the query has no words.
+    public static func sqlCondition(column: String, query: String) -> String? {
+        let parts = words(of: query)
+        guard !parts.isEmpty else {
+            return nil
+        }
+        return parts.map { word -> String in
+            let escaped = word
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "%", with: "\\%")
+                .replacingOccurrences(of: "_", with: "\\_")
+                .replacingOccurrences(of: "'", with: "''")
+            return "\(column) LIKE '%\(escaped)%' ESCAPE '\\'"
+        }.joined(separator: " AND ")
+    }
+
+    /// For each of `words`, the pins of the people whose name holds it - read from the contacts and
+    /// from the groups' member lists, which is where a mention's name comes from (MentionNames).
+    /// Only pins made of letters and digits are kept, since they go into SQL as they are.
+    ///
+    /// Opens a transaction of its own, so it is never called from inside one.
+    static func peopleNamed(by words: [String]) -> [[String]] {
+        var named = Array(repeating: [String](), count: words.count)
+        guard !words.isEmpty else {
+            return named
+        }
+        var seen = Array(repeating: Set<String>(), count: words.count)
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            let query = "SELECT f_pin, first_name || ' ' || ifnull(last_name, '') FROM BUDDY "
+                + "UNION SELECT f_pin, first_name || ' ' || ifnull(last_name, '') FROM GROUPZ_MEMBER"
+            guard let cursor = Database.shared.getRecords(fmdb: fmdb, query: query) else {
+                return
+            }
+            while cursor.next() {
+                let pin = cursor.string(forColumnIndex: 0) ?? ""
+                guard !pin.isEmpty, pin.allSatisfy({ $0.isLetter || $0.isNumber }) else {
+                    continue
+                }
+                let name = cursor.string(forColumnIndex: 1) ?? ""
+                for (index, word) in words.enumerated() where matches(name, query: word) && !seen[index].contains(pin) {
+                    seen[index].insert(pin)
+                    named[index].append(pin)
+                }
+            }
+            cursor.close()
+        })
+        return named
+    }
+
+    /// The SQL condition for a message that holds every one of `words` - each in its words, in a
+    /// mention of someone the word names (stored as "@pin" in `column`), or, given `senderColumn`,
+    /// in the name of whoever sent it. `people` is peopleNamed(by: words). Nil when there are no
+    /// words.
+    ///
+    /// Fix: a mention is stored as its pin and shown as its name, so a search for "Jano" lit the
+    /// "@Jano" in a bubble and did not count the message - the stored text had no "Jano" in it to
+    /// be found.
+    static func sqlCondition(column: String, words: [String], people: [[String]], senderColumn: String? = nil) -> String? {
+        guard !words.isEmpty else {
+            return nil
+        }
+        return words.enumerated().map { index, word -> String in
+            var either = [sqlCondition(column: column, query: word) ?? "0"]
+            let pins = index < people.count ? Array(people[index].prefix(100)) : []
+            if !pins.isEmpty {
+                if let senderColumn = senderColumn {
+                    either.append("\(senderColumn) IN (" + pins.map { "'\($0)'" }.joined(separator: ", ") + ")")
+                }
+                either += pins.map { "instr(\(column), '@\($0)') > 0" }
+            }
+            return "(" + either.joined(separator: " OR ") + ")"
+        }.joined(separator: " AND ")
+    }
+
+    /// Every stretch of `text` to light up for `query`.
+    public static func ranges(in text: String, query: String) -> [NSRange] {
+        let string = text as NSString
+        let length = string.length
+        var found: [NSRange] = []
+        for word in words(of: query) {
+            var from = 0
+            while from < length {
+                let hit = string.range(of: word, options: compare, range: NSRange(location: from, length: length - from))
+                guard hit.location != NSNotFound, hit.length > 0 else {
+                    break
+                }
+                // The whole word the match is in, from its start to its end. Fix: a match inside
+                // a word lit only the letters typed - "roo[te]d" - where the reader is looking
+                // for the word.
+                var start = hit.location
+                while isWordCharacter(in: string, at: start - 1) {
+                    start -= 1
+                }
+                var end = NSMaxRange(hit)
+                while isWordCharacter(in: string, at: end) {
+                    end += 1
+                }
+                found.append(NSRange(location: start, length: end - start))
+                // On from the end of that word: it is lit already, whatever else it holds.
+                from = end
+            }
+        }
+        return found
+    }
+
+    /// A letter or a digit - what a word is made of - at `index`, as a UTF-16 unit.
+    private static func isWordCharacter(in string: NSString, at index: Int) -> Bool {
+        guard index >= 0, index < string.length else {
+            return false
+        }
+        let unit = string.character(at: index)
+        guard let scalar = Unicode.Scalar(unit) else {
+            // Half of a pair: an emoji or the like, never part of a word.
+            return false
+        }
+        return CharacterSet.alphanumerics.contains(scalar)
     }
 }

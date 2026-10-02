@@ -472,7 +472,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                     return
                 }
                 let alertController = LibAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
-                if(item.title.contains("Change")){
+                if item.title == "Change Admin / Internal Password".localized() {
                     if let action = self.actionChangePassword(for: "admin", title: "Change Admin Password".localized()) {
                         alertController.addAction(action)
                     }
@@ -779,9 +779,9 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
             }))
             self.present(alert, animated: true, completion: nil)
         } else if item.title == "Version".localized() {
-            let alert = LibAlertController(title: "Version".localized(), message: API.sGetVersion() + "\nConnection: \(API.nGetCLXConnState() == 1)", preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "Dismiss".localized(), style: UIAlertAction.Style.default, handler: nil))
-            self.present(alert, animated: true, completion: nil)
+            // Three taps: the nuSDK version and whether it is online; five: the diagnostics box -
+            // as Android does it. See VersionDiagnostics.
+            VersionDiagnostics.shared.tap(from: self)
         }
     }
     

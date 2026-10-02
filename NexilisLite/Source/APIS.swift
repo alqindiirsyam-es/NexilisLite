@@ -236,6 +236,13 @@ public class APIS: NSObject {
     private static var transitioningDelegateRef: ZoomTransitioningDelegate?
     /// Configure Sentinel/ZTA before opening the UCPaaS session.
     public static func configureSentinel(_ configuration: NexilisZTAConfiguration) {
+        // Fix: the app's face was put in place inside Nexilis' own start-up, which runs after the
+        // ZTA chain has passed - and the chain has screens of its own, a keypad and a failure
+        // notice among them. Those came up in the system face because the exchange had not
+        // happened yet, and a font already given to a label is not taken back. This is the
+        // earliest call a host makes, it costs four method exchanges, and it does nothing at all
+        // the second time - see UIFont.libOverrideInitialize.
+        UIFont.installLibraryFace()
         SentinelSecurityGate.configure(configuration)
     }
 
@@ -616,6 +623,10 @@ public class APIS: NSObject {
     }
 
     public static func openContactCenter(media: Int? = nil, category: Int? = nil) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { openContactCenter(media: media, category: category) }
+            return
+        }
         if blockedByCallInProgress() {
             return
         }
@@ -650,7 +661,7 @@ public class APIS: NSObject {
         } else {
             if media != nil || (media == nil && category != nil) {
                 if media == nil || media! < 0 || media! > 2 {
-                    UIApplication.shared.visibleViewController?.view.makeToast("108:Invalid Contact Center media parameter (0:Chat, 1:Audio Call, 2:Video Call)".localized(), duration: 3)
+                    UIApplication.shared.visibleViewController?.view.makeToast("108:Invalid Call Center media parameter (0:Chat, 1:Audio Call, 2:Video Call)".localized(), duration: 3)
                     return
                 }
             }
@@ -658,24 +669,17 @@ public class APIS: NSObject {
                 if category != 0 {
                     let service = CategoryCC.getDataFromServiceId(service_id: "\(category!)")
                     if service == nil {
-                        UIApplication.shared.visibleViewController?.view.makeToast("109:Invalid Contact Center category parameter".localized(), duration: 3)
+                        UIApplication.shared.visibleViewController?.view.makeToast("109:Invalid Call Center category parameter".localized(), duration: 3)
                         return
                     }
                     let serviceChilds = CategoryCC.getDatafromParent(parent: service!.service_id)
                     if serviceChilds.count > 0 {
-                        UIApplication.shared.visibleViewController?.view.makeToast("109:Invalid Contact Center category parameter".localized(), duration: 3)
+                        UIApplication.shared.visibleViewController?.view.makeToast("109:Invalid Call Center category parameter".localized(), duration: 3)
                         return
                     }
                 }
             }
-            let isWaitingRequestCC: Bool = SecureUserDefaults.shared.value(forKey: "waitingRequestCC") ?? false
-            if isWaitingRequestCC {
-                let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
-                imageView.tintColor = .white
-                let banner = FloatingNotificationBanner(title: "You have requested Call Center, please wait for response.".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
-                banner.show()
-                return
-            }
+            if blockedByPendingContactCenterRequest() { return }
             let controller = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
             controller.isContactCenter = true
             if media != nil {
@@ -693,7 +697,17 @@ public class APIS: NSObject {
         }
     }
     
+    static func blockedByPendingContactCenterRequest() -> Bool {
+        // Consume this entry by resuming the same editor, not by rejecting navigation.
+        ContactCenterSession.shared.resumeExistingEditor()
+    }
+
     public static func openContactCenterWithContext(context: String) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { openContactCenterWithContext(context: context) }
+            return
+        }
+        if blockedByPendingContactCenterRequest() { return }
         if blockedByCallInProgress() {
             return
         }
@@ -2332,7 +2346,7 @@ public class APIS: NSObject {
                                                 print("Error scheduling notification: \(error.localizedDescription)")
                                             }
                                         }
-                                        Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call".localized() + " at 0", fPin: callFrom, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
+                                        Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call" + " at 0", fPin: callFrom, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
                                         finish(.newData)
                                     } else {
                                         finish(.noData)
@@ -2402,6 +2416,24 @@ public class APIS: NSObject {
     }
     
     private static func ccActionFromAPN(data: [String: Any], fromTapNotif: Bool = false) {
+        let ccMessage = TMessage()
+        for (key, value) in data { if let value = value as? String { ccMessage.mBodies[key] = value } }
+        ccMessage.mCode = data["nx_code"] as? String ?? data["nxc"] as? String ?? ""
+        DispatchQueue.main.async {
+            ContactCenterSession.shared.receive(ccMessage, remotePush: true)
+            if ccMessage.getCode() == CoreMessage_TMessageCode.ACCEPT_CALL_CENTER,
+               ContactCenterSession.shared.context?.ticket == ccMessage.getBody(key: CoreMessage_TMessageKey.DATA) {
+                // Hydrate the retained editor AFTER establishing its context, also on a cold APNs tap.
+                // The editor's acceptedCCTicket guard makes socket/APNs replays idempotent.
+                NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat),
+                    object: nil, userInfo: ["message": ccMessage])
+            }
+            if fromTapNotif, ccMessage.getCode() == CoreMessage_TMessageCode.ACCEPT_CALL_CENTER,
+               ContactCenterSession.shared.context?.requester == User.getMyPin(),
+               ContactCenterSession.shared.context?.ticket == ccMessage.getBody(key: CoreMessage_TMessageKey.DATA) {
+                _ = ContactCenterSession.shared.resumeExistingEditor()
+            }
+        }
         var nxCode = data["nx_code"] as? String ?? ""
         let packetId = data[CoreMessage_TMessageKey.PACKET_ID] as? String ?? ""
         if nxCode.isEmpty {
@@ -2417,28 +2449,11 @@ public class APIS: NSObject {
                 let displayName = dataUser?.fullName ?? ""
                 let thumb = dataUser?.thumb ?? ""
                 let complainId = data[CoreMessage_TMessageKey.DATA] as? String ?? ""
-                Nexilis.viewFormCS(pin: pin, channel: channel, displayName: displayName, thumb: thumb, id: complainId)
+                Nexilis.viewFormCS(pin: pin, channel: channel, displayName: displayName, thumb: thumb, id: complainId,
+                                   details: ContactCenterOfficerRequestDetails.metadata(from: data))
             }
         } else if nxCode == CoreMessage_TMessageCode.ACCEPT_CALL_CENTER {
-            let fPinContacCenter = data[CoreMessage_TMessageKey.F_PIN] as? String ?? ""
-            let requester = data[CoreMessage_TMessageKey.UPLINE_PIN] as? String ?? ""
-            let complaintId = data[CoreMessage_TMessageKey.DATA] as? String ?? ""
-            let channel = data[CoreMessage_TMessageKey.CHANNEL] as? String ?? ""
-            if !fromTapNotif {
-                let message = TMessage()
-                message.mBodies[CoreMessage_TMessageKey.F_PIN] = fPinContacCenter
-                message.mBodies[CoreMessage_TMessageKey.DATA] = complaintId
-                message.mBodies[CoreMessage_TMessageKey.CHANNEL] = channel
-                message.mCode = nxCode
-                var dataMessage: [AnyHashable : Any] = [:]
-                dataMessage["message"] = message
-                NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil, userInfo: dataMessage)
-            }
-            let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
-            if !requester.isEmpty && onGoingCC.isEmpty {
-                SecureUserDefaults.shared.set("\(requester),\(fPinContacCenter),\(complaintId)", forKey: "onGoingCC")
-                SecureUserDefaults.shared.set("\(fPinContacCenter)", forKey: "membersCC")
-            }
+            // Context, complete metadata and editor/tap routing are handled together above.
         } else if nxCode == CoreMessage_TMessageCode.INVITE_TO_ROOM_CONTACT_CENTER {
             if !fromTapNotif || (fromTapNotif && !isHasFormCS) {
                 isHasFormCS = true
@@ -2491,7 +2506,8 @@ public class APIS: NSObject {
                     if nxCode == "CL03" {
                         Nexilis.callAPNActivated = true
                         APIS.uuidCall = UUID()
-                        CallManager.shared.reportIncomingCall(uuid: APIS.uuidCall ?? UUID(), callerName: callFromName, callerId: callFrom, isVideo: callType != "1")
+                        CallManager.shared.reportIncomingCall(uuid: APIS.uuidCall ?? UUID(), callerName: callFromName, callerId: callFrom, isVideo: callType != "1", onReported: completion)
+                        return
                     } else {
                         if APIS.uuidCall != nil {
                             CallManager.shared.endCall(uuid: APIS.uuidCall!) {
@@ -2515,7 +2531,7 @@ public class APIS: NSObject {
                                         print("Error scheduling notification: \(error.localizedDescription)")
                                     }
                                 }
-                                Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call".localized() + " at 0", fPin: callCancel, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
+                                Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call" + " at 0", fPin: callCancel, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
                             }
                         } else if Nexilis.isOpenPageCall {
 //                            CallManager.shared.reportIncomingCall(uuid: APIS.uuidCall ?? UUID(), callerName: callCancelName, callerId: callFrom, isVideo: callType != "1", isAutoCancel: true)
@@ -2524,7 +2540,7 @@ public class APIS: NSObject {
                             dataMessage["pin"] = callCancel
                             NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.callFCM), object: nil, userInfo: dataMessage)
                         } else {
-                            CallManager.shared.reportIncomingCall(uuid: APIS.uuidCall ?? UUID(), callerName: callCancelName, callerId: callFrom, isVideo: callType != "1", isAutoCancel: true)
+                            CallManager.shared.reportIncomingCall(uuid: APIS.uuidCall ?? UUID(), callerName: callCancelName, callerId: callFrom, isVideo: callType != "1", isAutoCancel: true, onReported: completion)
                             let center = UNUserNotificationCenter.current()
                             var textCall = ""
                             if callType == "1" {
@@ -2543,12 +2559,14 @@ public class APIS: NSObject {
                                     print("Error scheduling notification: \(error.localizedDescription)")
                                 }
                             }
-                            Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call".localized() + " at 0", fPin: callCancel, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
+                            Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call" + " at 0", fPin: callCancel, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
+                            return
                         }
                     }
                 }
             }
         }
+        completion()
     }
     
     static func ackAPN(id: String) {
@@ -3349,8 +3367,27 @@ public class APIS: NSObject {
         }
     }
 
+    /// Hosts use this before displaying an OS banner while the app is foregrounded.
+    /// CC status belongs in the SDK card, not both an OS banner and an in-app card.
+    public static func presentContactCenterNotificationInApp(_ notification: UNNotification) -> Bool {
+        let content = notification.request.content
+        if content.userInfo["nexilis_cc_status"] != nil {
+            DispatchQueue.main.async {
+                ContactCenterSession.shared.presentStatus(info: content.userInfo, title: content.title, body: content.body)
+            }
+            return true
+        }
+        if let data = content.userInfo["data"] as? [String: Any],
+           (data["nx_code"] as? String ?? data["nxc"] as? String) == CoreMessage_TMessageCode.ACCEPT_CALL_CENTER {
+            ccActionFromAPN(data: data)
+            return true
+        }
+        return false
+    }
+
     public static func openNotificationNexilis(_ response: UNNotificationResponse) {
         DispatchQueue.main.async{
+            if ContactCenterSession.shared.openStatus(response.notification.request.content.userInfo) { return }
             if let userInfo = response.notification.request.content.userInfo as? [String: String] {
                 let id = userInfo["id"] ?? ""
                 let type = userInfo["type"] ?? ""
@@ -3958,7 +3995,7 @@ public class APIS: NSObject {
     }
     
     public static func nexilisShowAlertWithHTMLMessage(on viewController: UIViewController, title: String, message: String = "<b>Bold</b> and <i>italic</i> text in an alert") {
-        let alert = UIAlertController(title: title, message: "", preferredStyle: .alert)
+        let alert = LibAlertController(title: title, message: "", preferredStyle: .alert)
         
         let titleFont = UIFont.boldSystemFont(ofSize: 16)
         let titleAttributes = [NSAttributedString.Key.font: titleFont]
@@ -5419,5 +5456,73 @@ extension UINavigationController {
         UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
         let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
         self.navigationBar.titleTextAttributes = textAttributes
+    }
+}
+
+/// The hidden diagnostics behind Setting's "Version" row, the way Android has them.
+///
+/// Fix: one tap on the row put up an alert with the nuSDK version and the connection state -
+/// something an ordinary user tapping around Setting ran into for nothing. Android keeps both
+/// behind repeated taps: three in a row show the nuSDK version and whether it is online as a
+/// toast, and five open a box where a word asks for one more piece of information (the user's
+/// id, the app id, the session id, ...). Taps more than a second apart start the count again.
+public final class VersionDiagnostics {
+
+    public static let shared = VersionDiagnostics()
+
+    private var count = 0
+    private var reset: DispatchWorkItem?
+
+    private init() {}
+
+    public func tap(from host: UIViewController) {
+        reset?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.count = 0 }
+        reset = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+        count += 1
+        if count == 3 {
+            host.view.makeToast("\(API.sGetVersion() ?? "") \(API.nGetCLXConnState() == 1)", duration: 2)
+        } else if count == 5 {
+            askForCommand(from: host)
+        }
+    }
+
+    private func askForCommand(from host: UIViewController) {
+        let alert = LibAlertController(title: "", message: nil, preferredStyle: .alert)
+        alert.addTextField { field in
+            field.autocapitalizationType = .none
+            field.autocorrectionType = .no
+        }
+        alert.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel))
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak alert, weak host] _ in
+            guard let host, let value = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespaces),
+                  let answer = VersionDiagnostics.answer(to: value) else { return }
+            host.view.makeToast(answer, duration: 3.5)
+        })
+        host.present(alert, animated: true)
+    }
+
+    /// What a word typed into the box shows - nil for a word that means nothing, which is
+    /// answered with nothing, as Android does.
+    private static func answer(to value: String) -> String? {
+        if value == Utils.decrypt(str: "77979zl") {
+            return API.sGetServerAddress() ?? ""
+        }
+        switch value.lowercased() {
+        case "ucpaas":
+            let library = Bundle(for: Nexilis.self).infoDictionary?["CFBundleShortVersionString"] as? String
+            return library ?? UIApplication.appVersion ?? ""
+        case "userid":
+            return User.getMyPin() ?? ""
+        case "appid":
+            return APIS.getAppNm()
+        case "sessid":
+            return Utils.getConnectionID()
+        case "domain":
+            return Utils.getDomainOpr()
+        default:
+            return nil
+        }
     }
 }

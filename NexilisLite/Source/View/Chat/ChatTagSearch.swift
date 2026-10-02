@@ -307,6 +307,9 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
     public func reset() {
         selectedTag = 0
         searchText = ""
+        // A read still under way belongs to the filter that has just gone.
+        loadGeneration += 1
+        isLoading = false
         results = []
         // Rule one: the filter going takes its sound with it.
         stopOwnAudio()
@@ -534,7 +537,23 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
         emptyLabel.isHidden = true
         resultsView.addSubview(emptyLabel)
         emptyLabel.anchor(left: resultsView.leftAnchor, right: resultsView.rightAnchor, paddingLeft: 20, paddingRight: 20, centerX: resultsView.centerXAnchor, centerY: resultsView.centerYAnchor)
+
+        loadingSpinner.hidesWhenStopped = true
+        resultsView.addSubview(loadingSpinner)
+        loadingSpinner.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            loadingSpinner.centerXAnchor.constraint(equalTo: resultsView.centerXAnchor),
+            loadingSpinner.centerYAnchor.constraint(equalTo: resultsView.centerYAnchor)
+        ])
     }
+
+    /// Shown while a filter's results are being read.
+    private let loadingSpinner = UIActivityIndicatorView(style: .medium)
+    private var isLoading = false
+    /// Which read the results on screen belong to; a read answered after a newer one began is
+    /// thrown away.
+    private var loadGeneration = 0
+    private static let loadQueue = DispatchQueue(label: "io.nexilis.chatTagSearch.load", qos: .userInitiated)
 
     /// Whether this filter is about media at all.
     private var showsMedia: Bool {
@@ -561,23 +580,74 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
         audioRows.removeAll()
         audioButtonResults.removeAll()
         linkAnswers.removeAll()
-        switch selectedTag {
-        case ChatTagSearch.unreadTag:
-            results = Chat.getData(isUnread: true, withText: searchText)
-        case ChatTagSearch.photosTag, ChatTagSearch.videosTag, ChatTagSearch.gifsTag:
-            results = Chat.getData(isImage: selectedTag == ChatTagSearch.photosTag,
-                                   isVideo: selectedTag == ChatTagSearch.videosTag,
-                                   isGIF: selectedTag == ChatTagSearch.gifsTag,
-                                   withText: searchText)
-        case ChatTagSearch.documentsTag:
-            results = Chat.getData(isDoc: true, withText: searchText)
-        case ChatTagSearch.linksTag:
-            results = Chat.getData(isLink: true, withText: searchText)
-        case ChatTagSearch.audiosTag:
-            results = Chat.getData(isAudio: true, withText: searchText)
-        default:
+        // Read away from the main thread, with a spinner up meanwhile. Fix: the read ran on the
+        // main thread, and a filter over a long history held the screen still until it was done.
+        loadGeneration += 1
+        let asked = loadGeneration
+        let tag = selectedTag
+        let text = searchText
+        guard tag != 0 else {
+            isLoading = false
             results = []
+            finishReload()
+            return
         }
+        isLoading = true
+        updateResultsVisibility()
+        ChatTagSearch.loadQueue.async { [weak self] in
+            let found = ChatTagSearch.read(tag: tag, text: text)
+            DispatchQueue.main.async {
+                guard let self = self, asked == self.loadGeneration else {
+                    return
+                }
+                self.isLoading = false
+                self.results = found
+                self.finishReload()
+            }
+        }
+    }
+
+    /// What a filter finds for `text`.
+    ///
+    /// With a word of two letters or more in it, every word has to be found - in the message, in
+    /// the name of whoever sent it, in a mention (written as the name, as the row writes it), or in
+    /// a document's, a recording's or a link's own name, all of which are in the message's text -
+    /// by the rule the conversation's own search keeps (see ChatSearchMatch), so what is found is
+    /// what is lit. Fix: the words were matched as one string, by SQL, against the stored text -
+    /// where a mention is a pin - and the sender's name, and nothing was lit in what came back.
+    private static func read(tag: Int, text: String) -> [Chat] {
+        let words = ChatSearchMatch.words(of: text)
+        // Shorter than a word: the filter as it always was.
+        let sqlText = words.isEmpty ? text : ""
+        var found: [Chat]
+        switch tag {
+        case ChatTagSearch.unreadTag:
+            return Chat.getData(isUnread: true, withText: text)
+        case ChatTagSearch.photosTag, ChatTagSearch.videosTag, ChatTagSearch.gifsTag:
+            found = Chat.getData(isImage: tag == ChatTagSearch.photosTag,
+                                 isVideo: tag == ChatTagSearch.videosTag,
+                                 isGIF: tag == ChatTagSearch.gifsTag,
+                                 withText: sqlText)
+        case ChatTagSearch.documentsTag:
+            found = Chat.getData(isDoc: true, withText: sqlText)
+        case ChatTagSearch.linksTag:
+            found = Chat.getData(isLink: true, withText: sqlText)
+        case ChatTagSearch.audiosTag:
+            found = Chat.getData(isAudio: true, withText: sqlText)
+        default:
+            return []
+        }
+        guard !words.isEmpty else {
+            return found
+        }
+        found = found.filter { chat in
+            let written = ChatMessageText.withoutLinkPreview(chat.messageText).mentionsAsNames()
+            return ChatSearchMatch.matches(chat.name + " " + written, query: text)
+        }
+        return found
+    }
+
+    private func finishReload() {
         updateResultsVisibility()
         gridView.collectionViewLayout.invalidateLayout()
         reloadBothViews()
@@ -614,8 +684,13 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
 
     private func updateResultsVisibility() {
         resultsView.isHidden = !isShowingResults
+        if isLoading && isShowingResults {
+            loadingSpinner.startAnimating()
+        } else {
+            loadingSpinner.stopAnimating()
+        }
         let nothingFound = results.isEmpty
-        emptyLabel.isHidden = !nothingFound
+        emptyLabel.isHidden = !nothingFound || isLoading
         emptyLabel.textColor = resultsView.traitCollection.userInterfaceStyle == .dark ? .lightGray : .gray
         gridView.isHidden = !showsGrid || nothingFound
         tableView.isHidden = showsGrid || nothingFound
@@ -779,7 +854,14 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
         return selectedTag == ChatTagSearch.linksTag ? 160.0 : 130.0
     }
 
+    /// A row, with what was searched for lit in it - see ChatSearchMatch.highlightMatches.
     public func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = buildRow(tableView, cellForRowAt: indexPath)
+        ChatSearchMatch.highlightMatches(in: cell.contentView, query: searchText)
+        return cell
+    }
+
+    private func buildRow(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "chatTagCell", for: indexPath)
         cell.backgroundColor = .clear
         cell.selectionStyle = .none
@@ -794,7 +876,7 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
         }
                 let title = UILabel()
                 let subtitle = UILabel()
-                title.textColor = .label
+                title.textColor = titleColour
                 subtitle.textColor = .secondaryLabel
                 title.font = .systemFont(ofSize: 16 + String.offset(), weight: .medium)
                 subtitle.font = .systemFont(ofSize: 14 + String.offset())
@@ -817,6 +899,7 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
                 imageArrowRight.anchor(top: content.topAnchor, right: content.rightAnchor, paddingTop: 10, paddingRight: 20)
                 
                 let timeView = UILabel()
+                timeView.tag = ChatSearchMatch.unlitTag
                 content.addSubview(timeView)
                 timeView.anchor(top: content.topAnchor, right: imageArrowRight.leftAnchor, paddingTop: 10, paddingRight: 20)
                 timeView.textColor = .gray
@@ -1161,7 +1244,7 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
         thumbView.clipsToBounds = true
         thumbButton.addSubview(thumbView)
         thumbView.anchor(top: thumbButton.topAnchor, left: thumbButton.leftAnchor, bottom: thumbButton.bottomAnchor, right: thumbButton.rightAnchor)
-        loadThumbnail(named: data.thumb, into: thumbView)
+        loadThumbnail(named: data.thumb, into: thumbView, picture: data.image)
 
         let title = UILabel()
         title.text = conversationName(for: data)
@@ -1169,7 +1252,9 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
         // framework swizzles the system font and maps .semibold to its *bold italic* face
         // (see UIFont.libOverrideInitialize), which is what made these titles come out slanted.
         title.font = .systemFont(ofSize: 17 + String.offset(), weight: .medium)
-        title.textColor = content.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        title.textColor = ChatSearchMatch.words(of: searchText).isEmpty
+            ? (content.traitCollection.userInterfaceStyle == .dark ? .white : .black)
+            : titleColour
         title.lineBreakMode = .byTruncatingTail
         content.addSubview(title)
         title.anchor(top: content.topAnchor, left: content.leftAnchor, right: thumbButton.leftAnchor,
@@ -1214,7 +1299,11 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
             sender = ""
         }
         if !sender.isEmpty {
-            line.append(NSAttributedString(string: sender, attributes: [.font: font, .foregroundColor: UIColor.gray]))
+            // In medium, the weight the chat list and the other search results write a sender in.
+            line.append(NSAttributedString(string: sender, attributes: [
+                .font: UIFont.systemFont(ofSize: font.pointSize, weight: .medium),
+                .foregroundColor: UIColor.gray
+            ]))
         }
 
         let symbol: String
@@ -1266,11 +1355,27 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
         if written.contains("■") {
             written = written.components(separatedBy: "■")[0]
         }
-        let caption = written.mentionsAsNames().trimmingCharacters(in: .whitespacesAndNewlines)
+        var caption = written.mentionsAsNames().trimmingCharacters(in: .whitespacesAndNewlines)
+        // While words are searched for, the caption starts a few words before the first of them,
+        // as the search across everything shows a message (ChatSearchMatch.snippet). Fix: it was
+        // shown from its start and cut at two lines, so a word found further in was cut off and
+        // nothing lit could be seen.
+        if !ChatSearchMatch.words(of: searchText).isEmpty {
+            caption = ChatSearchMatch.snippet(caption, query: searchText)
+        }
         let said = showsCaption && !caption.isEmpty ? caption : fallback
         line.append(NSAttributedString(string: said,
                                        attributes: [.font: font, .foregroundColor: UIColor.gray]))
         return line
+    }
+
+    /// The colour a result's title - the group's name, or the person's in a conversation of two - is
+    /// set in. While words are being searched for it is grey, like the rest of the row, so that
+    /// only what was found reads dark (see ChatSearchMatch.highlightMatches); otherwise it is the
+    /// text colour it always was. Fix: it stayed dark while searching, and a title with nothing in
+    /// it that was searched for read as lit.
+    private var titleColour: UIColor {
+        return ChatSearchMatch.words(of: searchText).isEmpty ? .label : .secondaryLabel
     }
 
     /// Whether a result belongs to a group or forum rather than a one-to-one conversation.
@@ -1344,9 +1449,20 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
     }
 
     /// The stored thumbnail for a message, from wherever it happens to live.
-    private func loadThumbnail(named thumb: String, into imageView: UIImageView) {
+    private func loadThumbnail(named thumb: String, into imageView: UIImageView, picture image: String = "") {
         guard !thumb.isEmpty else {
             return
+        }
+        // No thumbnail that can be shown, and the picture is here: it stands in - see
+        // ThumbnailFallback.
+        func fromPicture() -> Bool {
+            guard ThumbnailFallback.isOnDevice(image) else {
+                return false
+            }
+            ThumbnailFallback.load(fromImage: image, as: thumb) { [weak imageView] picture in
+                if let picture = picture { imageView?.image = picture }
+            }
+            return true
         }
         if let cached = Nexilis.imageCache.object(forKey: thumb as NSString) {
             imageView.image = cached
@@ -1364,6 +1480,9 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
             data = try? Data(contentsOf: URL(fileURLWithPath: dirPath).appendingPathComponent(thumb))
         }
         guard let data = data, let image = UIImage(data: data)?.resize(target: CGSize(width: 500, height: 500)) else {
+            if fromPicture() {
+                return
+            }
             // Not here yet: the thumbnail is small, so it is simply fetched - the row redraws
             // itself when it lands, through the same progress notification everything else
             // listens to.
@@ -1778,10 +1897,21 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
                                 return nil
                             }()
                             imageView.image = image
+                            // The thumbnail will not decode: the picture, if it is here, stands in.
+                            if image == nil {
+                                ThumbnailFallback.load(fromImage: imgData, as: thumb) { [weak imageView] picture in
+                                    if let picture = picture { imageView?.image = picture }
+                                }
+                            }
                         }
                     }
                 } catch {
                     
+                }
+            } else if ThumbnailFallback.isOnDevice(imgData) {
+                // No thumbnail to be had, but the picture is here - see ThumbnailFallback.
+                ThumbnailFallback.load(fromImage: imgData, as: thumb) { [weak imageView] picture in
+                    if let picture = picture { imageView?.image = picture }
                 }
             } else {
                 Download().startHTTP(forKey: thumb) { (name, progress) in
@@ -1938,5 +2068,849 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
         // QLPreviewController only ever asks after previewItem was set, but a nil here would
         // be a crash rather than an empty preview.
         return previewItem ?? (URL(fileURLWithPath: "") as NSURL)
+    }
+}
+
+// MARK: - Searching everything
+
+/// What the chat list shows while words are typed and no filter is on: the conversations whose
+/// name has them, the contacts, the starred messages and every message - each under a heading
+/// of its own, the way WhatsApp lays its search out. A host places `resultsView` over its own
+/// list, exactly as it does the filter results above, and calls `search(_:)` as the text changes.
+///
+/// Fix: the list answered a search with one flat run of rows - a conversation that happened to
+/// have the words in its last message and a message deep in some other one looked the same -
+/// and drew nothing of what a message carried: no picture, no link.
+public final class ChatGlobalSearch: NSObject, UITableViewDataSource, UITableViewDelegate {
+
+    /// Covers the host's own list while there is a search to show, and hides itself when not.
+    public let resultsView = UIView()
+    /// Something was tapped, as a conversation to open: a chat, a contact (a conversation with
+    /// them), or a message - carrying its id, so the conversation opens at it.
+    public var onSelect: ((Chat) -> Void)?
+    /// Called when the results cover the host's list or uncover it.
+    public var onVisibilityChanged: ((Bool) -> Void)?
+    public private(set) var isShowingResults = false
+    /// The words being searched for while results are up, for whatever is opened from them to
+    /// keep lit - see EditorPersonal.highlightQuery. Empty when there are no results.
+    public var currentQuery: String {
+        return isShowingResults ? query : ""
+    }
+    /// How much of the top of the results the host draws over itself.
+    public var resultsTopInset: CGFloat = 0 {
+        didSet {
+            guard resultsTopInset != oldValue else {
+                return
+            }
+            tableView.contentInset.top = resultsTopInset
+            tableView.verticalScrollIndicatorInsets.top = resultsTopInset
+        }
+    }
+
+    private enum Kind {
+        case chats, contacts, starred, messages
+    }
+
+    /// A message found, and what it is shown as.
+    private struct Found {
+        let chat: Chat
+        /// The conversation it is in, as its row is titled.
+        let title: String
+        /// Who said it, as the row writes it before the words - empty when nobody needs naming.
+        let sender: String
+        /// The words the bubble shows.
+        let text: String
+    }
+
+    private let tableView = UITableView(frame: .zero, style: .plain)
+    private let emptyLabel = UILabel()
+    /// Up while a search is being read - before then the list would only say nothing was found.
+    private let loadingSpinner = UIActivityIndicatorView(style: .medium)
+    private var query = ""
+    private var chats: [Found] = []
+    private var contacts: [User] = []
+    private var starred: [Found] = []
+    private var messages: [Found] = []
+    private var sections: [Kind] = []
+    /// Which search the results on screen belong to. A search answered after a newer one began
+    /// is thrown away.
+    private var generation = 0
+    private var linkAnswers: [String: LinkPreviewStore.Answer] = [:]
+    private static let queue = DispatchQueue(label: "ChatGlobalSearch", qos: .userInitiated)
+
+    public override init() {
+        super.init()
+        resultsView.isHidden = true
+        resultsView.backgroundColor = .clear
+        tableView.backgroundColor = .clear
+        tableView.separatorStyle = .none
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.keyboardDismissMode = .onDrag
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.estimatedRowHeight = 80
+        tableView.sectionHeaderHeight = UITableView.automaticDimension
+        tableView.estimatedSectionHeaderHeight = 52
+        if #available(iOS 15.0, *) {
+            tableView.sectionHeaderTopPadding = 0
+        }
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "row")
+        resultsView.addSubview(tableView)
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        emptyLabel.text = "No Result".localized()
+        emptyLabel.font = .systemFont(ofSize: 13 + String.offset())
+        emptyLabel.textColor = .secondaryLabel
+        emptyLabel.isHidden = true
+        resultsView.addSubview(emptyLabel)
+        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
+        loadingSpinner.hidesWhenStopped = true
+        resultsView.addSubview(loadingSpinner)
+        loadingSpinner.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            tableView.leadingAnchor.constraint(equalTo: resultsView.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: resultsView.trailingAnchor),
+            tableView.topAnchor.constraint(equalTo: resultsView.topAnchor),
+            tableView.bottomAnchor.constraint(equalTo: resultsView.bottomAnchor),
+            emptyLabel.centerXAnchor.constraint(equalTo: resultsView.centerXAnchor),
+            emptyLabel.topAnchor.constraint(equalTo: resultsView.topAnchor, constant: 40),
+            loadingSpinner.centerXAnchor.constraint(equalTo: resultsView.centerXAnchor),
+            loadingSpinner.topAnchor.constraint(equalTo: resultsView.topAnchor, constant: 40)
+        ])
+    }
+
+    // MARK: Running it
+
+    /// Searches for `text`, or puts the results away when there is nothing in it.
+    ///
+    /// Names are looked for from the first letter; messages only once a word of the search has
+    /// two, which is when a message search starts to mean something - see ChatSearchMatch.
+    public func search(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            clear()
+            return
+        }
+        guard trimmed != query || !isShowingResults else {
+            return
+        }
+        query = trimmed
+        generation += 1
+        let asked = generation
+        setShowing(true)
+        // While it is read: the spinner, and nothing claiming there is nothing.
+        emptyLabel.isHidden = true
+        loadingSpinner.startAnimating()
+        Self.queue.async { [weak self] in
+            let chats = Self.readChats(trimmed)
+            let contacts = Self.readContacts(trimmed, besides: Set(chats.map { $0.chat.pin }))
+            let found = ChatSearchMatch.words(of: trimmed).isEmpty ? [] : Self.readMessages(trimmed)
+            DispatchQueue.main.async {
+                guard let self = self, asked == self.generation else {
+                    return
+                }
+                self.loadingSpinner.stopAnimating()
+                self.chats = chats
+                self.contacts = contacts
+                self.starred = found.filter { $0.chat.isSelected }
+                self.messages = found
+                self.linkAnswers.removeAll()
+                self.sections = [(Kind.chats, !chats.isEmpty), (.contacts, !contacts.isEmpty),
+                                 (.starred, !self.starred.isEmpty), (.messages, !found.isEmpty)]
+                    .filter { $0.1 }.map { $0.0 }
+                self.emptyLabel.isHidden = !self.sections.isEmpty
+                self.tableView.reloadData()
+                if self.tableView.numberOfSections > 0 {
+                    self.tableView.setContentOffset(CGPoint(x: 0, y: -self.tableView.adjustedContentInset.top), animated: false)
+                }
+            }
+        }
+    }
+
+    /// Puts the results away and uncovers the host's list.
+    public func clear() {
+        generation += 1
+        query = ""
+        chats = []
+        contacts = []
+        starred = []
+        messages = []
+        sections = []
+        emptyLabel.isHidden = true
+        loadingSpinner.stopAnimating()
+        tableView.reloadData()
+        setShowing(false)
+    }
+
+    private func setShowing(_ showing: Bool) {
+        resultsView.isHidden = !showing
+        guard showing != isShowingResults else {
+            return
+        }
+        isShowingResults = showing
+        onVisibilityChanged?(showing)
+    }
+
+    // MARK: Reading
+
+    /// The conversations whose name holds every word.
+    private static func readChats(_ query: String) -> [Found] {
+        return Chat.getData().compactMap { chat -> Found? in
+            guard chat.pin != "Archived" else {
+                return nil
+            }
+            let title = conversationTitle(chat)
+            guard ChatSearchMatch.matchesName(title, query: query) else {
+                return nil
+            }
+            return Found(chat: chat, title: title, sender: "", text: ChatMessageText.withoutLinkPreview(chat.messageText))
+        }
+    }
+
+    /// A conversation's name as its row writes it: a group's own room by the group's name, one
+    /// of its topics as "group (topic)".
+    private static func conversationTitle(_ chat: Chat) -> String {
+        guard !chat.groupId.isEmpty else {
+            return chat.name
+        }
+        let group = chat.groupName.trimmingCharacters(in: .whitespaces)
+        if group.isEmpty {
+            return chat.name
+        }
+        if chat.name.isEmpty || chat.name == "Lounge".localized() {
+            return group
+        }
+        return "\(group) (\(chat.name))"
+    }
+
+    /// The people whose name holds every word, bar the ones already shown as a conversation.
+    private static func readContacts(_ query: String, besides pins: Set<String>) -> [User] {
+        var users: [User] = []
+        let me = User.getMyPin() ?? ""
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            guard let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, first_name, last_name, image_id, official_account, user_type FROM BUDDY where f_pin <> '\(me)' order by 2 collate nocase asc") else {
+                return
+            }
+            while cursor.next() {
+                let user = User(pin: cursor.string(forColumnIndex: 0) ?? "",
+                                firstName: cursor.string(forColumnIndex: 1) ?? "",
+                                lastName: cursor.string(forColumnIndex: 2) ?? "",
+                                thumb: cursor.string(forColumnIndex: 3) ?? "",
+                                userType: cursor.string(forColumnIndex: 5) ?? "")
+                user.official = cursor.string(forColumnIndex: 4) ?? ""
+                let name = user.fullName.trimmingCharacters(in: .whitespaces)
+                guard !user.pin.isEmpty, !pins.contains(user.pin), name != "USR\(user.pin)",
+                      ChatSearchMatch.matchesName(name, query: query) else {
+                    continue
+                }
+                users.append(user)
+            }
+            cursor.close()
+        })
+        return users
+    }
+
+    /// Every message holding every word, newest first. A starred one comes back with
+    /// `isSelected` set, which is how it is told apart without a second read.
+    private static func readMessages(_ query: String) -> [Found] {
+        let words = ChatSearchMatch.words(of: query)
+        guard !words.isEmpty else {
+            return []
+        }
+        let me = User.getMyPin() ?? ""
+        // Each word may be in the message, in the name of whoever sent it, or in the name of someone
+        // it mentions - see ChatSearchMatch.sqlCondition(column:words:people:senderColumn:). Fix:
+        // only the stored words were searched, so a search for somebody's name did not find what
+        // they had written, nor a message that mentioned them. The people are read first, in a
+        // transaction of their own.
+        let holds = ChatSearchMatch.sqlCondition(column: "m.message_text", words: words,
+                                                 people: ChatSearchMatch.peopleNamed(by: words),
+                                                 senderColumn: "m.f_pin") ?? "0"
+        let common = "ifnull(m.lock, '') <> '1' and ifnull(m.credential, '') <> '1' and m.is_call_center = 0 and \(holds)"
+        func select(_ pin: String, _ name: String, _ profile: String, _ groupId: String, _ groupName: String) -> String {
+            return "m.f_pin, \(pin), m.message_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, "
+                + "m.attachment_flag, m.message_scope_id, \(name), \(profile), m.thumb_id, m.audio_id, m.gif_id, "
+                + "\(groupId), \(groupName), ifnull(m.is_stared, 0)"
+        }
+        let sql = """
+                    select \(select("b.f_pin", "b.first_name || ' ' || ifnull(b.last_name, '')", "b.image_id", "''", "''"))
+                    from MESSAGE m join BUDDY b on (m.l_pin = b.f_pin OR m.f_pin = b.f_pin)
+                    where b.f_pin <> '\(me)' and m.message_scope_id = '\(MessageScope.WHISPER)' and \(common)
+                    union
+                    select \(select("m.l_pin", "'Bot'", "''", "''", "''"))
+                    from MESSAGE m where m.l_pin = '-999' and \(common)
+                    union
+                    select \(select("m.l_pin", "'\(Utils.getGPTBotName().replacingOccurrences(of: "'", with: "''"))'", "''", "''", "''"))
+                    from MESSAGE m where m.l_pin = '-997' and \(common)
+                    union
+                    select \(select("m.l_pin", "''", "g.image_id", "g.group_id", "g.f_name"))
+                    from MESSAGE m join GROUPZ g on m.l_pin = g.group_id
+                    where ifnull(m.chat_id, '') = '' and \(common)
+                    union
+                    select \(select("m.chat_id", "d.title", "g.image_id", "g.group_id", "g.f_name"))
+                    from MESSAGE m join DISCUSSION_FORUM d on m.chat_id = d.chat_id join GROUPZ g on d.group_id = g.group_id
+                    where \(common)
+                    order by 5 desc
+                    """
+        var found: [Found] = []
+        var seen = Set<String>()
+        var senders: [String: String] = [:]
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            guard let cursor = Database.shared.getRecords(fmdb: fmdb, query: sql) else {
+                return
+            }
+            while cursor.next() {
+                let messageId = cursor.string(forColumnIndex: 2) ?? ""
+                guard !messageId.isEmpty, !messageId.contains("NTFPIN_"), !seen.contains(messageId) else {
+                    continue
+                }
+                let file = cursor.string(forColumnIndex: 7) ?? ""
+                let audio = cursor.string(forColumnIndex: 13) ?? ""
+                var text = ChatMessageText.withoutLinkPreview(cursor.string(forColumnIndex: 3) ?? "")
+                if !file.isEmpty {
+                    text = text.component(1, separatedBy: "|")
+                } else if !audio.isEmpty {
+                    text = text.components(separatedBy: "|")[0]
+                }
+                seen.insert(messageId)
+                let chat = Chat(fpin: cursor.string(forColumnIndex: 0) ?? "",
+                                pin: cursor.string(forColumnIndex: 1) ?? "",
+                                messageId: messageId,
+                                counter: "0",
+                                messageText: text,
+                                serverDate: cursor.string(forColumnIndex: 4) ?? "",
+                                image: cursor.string(forColumnIndex: 5) ?? "",
+                                video: cursor.string(forColumnIndex: 6) ?? "",
+                                file: file,
+                                attachmentFlag: cursor.string(forColumnIndex: 8) ?? "",
+                                messageScope: cursor.string(forColumnIndex: 9) ?? "",
+                                name: cursor.string(forColumnIndex: 10) ?? "",
+                                profile: cursor.string(forColumnIndex: 11) ?? "",
+                                official: "",
+                                status: "",
+                                credential: "",
+                                lock: "",
+                                thumb: cursor.string(forColumnIndex: 12) ?? "",
+                                audio: audio,
+                                gif: cursor.string(forColumnIndex: 14) ?? "",
+                                groupId: cursor.string(forColumnIndex: 15) ?? "",
+                                groupName: cursor.string(forColumnIndex: 16) ?? "",
+                                isSelected: (cursor.string(forColumnIndex: 17) ?? "0") == "1")
+                var sender = ""
+                if chat.fpin == me {
+                    sender = "You".localized()
+                } else if !chat.groupId.isEmpty {
+                    if let known = senders[chat.fpin] {
+                        sender = known
+                    } else {
+                        sender = User.getDataCanNil(pin: chat.fpin, fmdb: fmdb)?.fullName.trimmingCharacters(in: .whitespaces) ?? ""
+                        // Someone in the group who is not a contact is named by the group's member
+                        // list, as the conversation names them. Read on this transaction's own
+                        // connection: Member.getMember opens one of its own.
+                        if sender.isEmpty, chat.fpin.allSatisfy({ $0.isLetter || $0.isNumber }),
+                           let member = Database.shared.getRecords(fmdb: fmdb, query: "SELECT first_name || ' ' || ifnull(last_name, '') FROM GROUPZ_MEMBER WHERE f_pin = '\(chat.fpin)' LIMIT 1") {
+                            if member.next() {
+                                sender = (member.string(forColumnIndex: 0) ?? "").trimmingCharacters(in: .whitespaces)
+                            }
+                            member.close()
+                        }
+                        senders[chat.fpin] = sender
+                    }
+                }
+                found.append(Found(chat: chat, title: conversationTitle(chat), sender: sender, text: text))
+            }
+            cursor.close()
+        })
+        // The words the bubble shows are what is searched and what is drawn - see
+        // ChatSearchMatch. That includes a mention, which is stored as "@pin" and shown as
+        // "@name". Fix: it was drawn as the pin, which nobody can read and nothing lit. The names
+        // are read here, after the transaction, because looking one up reads the database too.
+        return found.compactMap { hit in
+            let shown = ChatSearchMatch.withMentionNames(hit.text)
+            // The sender counts where the row names one - in a group, anyone but me. In a
+            // conversation with one person, every message would answer to their name, which is
+            // the Chats section's to find, not this one's.
+            let named = hit.chat.groupId.isEmpty || hit.chat.fpin == me ? "" : hit.sender + " "
+            guard ChatSearchMatch.matches(named + shown, query: query) else {
+                return nil
+            }
+            return Found(chat: hit.chat, title: hit.title, sender: hit.sender, text: shown)
+        }
+    }
+
+    // MARK: Table
+
+    public func numberOfSections(in tableView: UITableView) -> Int {
+        return sections.count
+    }
+
+    public func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        guard section < sections.count else {
+            return 0
+        }
+        switch sections[section] {
+        case .chats: return chats.count
+        case .contacts: return contacts.count
+        case .starred: return starred.count
+        case .messages: return messages.count
+        }
+    }
+
+    public func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
+        guard section < sections.count else {
+            return nil
+        }
+        let header = UIView()
+        header.backgroundColor = tableView.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        let label = UILabel()
+        switch sections[section] {
+        case .chats: label.text = "Chats".localized()
+        case .contacts: label.text = "Contacts".localized()
+        case .starred: label.text = "Starred".localized()
+        case .messages: label.text = "Messages".localized()
+        }
+        label.font = .systemFont(ofSize: 22 + String.offset(), weight: .bold)
+        label.textColor = .label
+        header.addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 16),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: header.trailingAnchor, constant: -16),
+            label.topAnchor.constraint(equalTo: header.topAnchor, constant: 18),
+            label.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -6)
+        ])
+        return header
+    }
+
+    public func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "row", for: indexPath)
+        cell.contentView.subviews.forEach { $0.removeFromSuperview() }
+        cell.backgroundColor = .clear
+        cell.selectionStyle = .default
+        guard indexPath.section < sections.count else {
+            return cell
+        }
+        switch sections[indexPath.section] {
+        case .chats:
+            buildChatRow(in: cell, found: chats[indexPath.row], indexPath: indexPath)
+        case .contacts:
+            buildContactRow(in: cell, user: contacts[indexPath.row], indexPath: indexPath)
+        case .starred:
+            buildMessageRow(in: cell, found: starred[indexPath.row], starred: true)
+        case .messages:
+            buildMessageRow(in: cell, found: messages[indexPath.row], starred: false)
+        }
+        return cell
+    }
+
+    public func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        guard indexPath.section < sections.count else {
+            return
+        }
+        let opened: Chat
+        switch sections[indexPath.section] {
+        case .chats:
+            // The conversation, not its last message.
+            let chat = chats[indexPath.row].chat
+            opened = Chat(fpin: chat.fpin, pin: chat.pin, messageId: "", counter: chat.counter,
+                          messageText: chat.messageText, serverDate: chat.serverDate, image: chat.image,
+                          video: chat.video, file: chat.file, attachmentFlag: chat.attachmentFlag,
+                          messageScope: chat.messageScope, name: chat.name, profile: chat.profile,
+                          official: chat.official, status: chat.status, credential: chat.credential,
+                          lock: chat.lock, thumb: chat.thumb, audio: chat.audio, gif: chat.gif,
+                          groupId: chat.groupId, groupName: chat.groupName, isBot: chat.isBot)
+        case .contacts:
+            let user = contacts[indexPath.row]
+            opened = Chat(fpin: user.pin, pin: user.pin, messageId: "", counter: "0", messageText: "",
+                          serverDate: "", image: "", video: "", file: "", attachmentFlag: "",
+                          messageScope: MessageScope.WHISPER, name: user.fullName, profile: user.thumb,
+                          official: user.official ?? "", status: "", credential: "", lock: "")
+        case .starred:
+            opened = starred[indexPath.row].chat
+        case .messages:
+            opened = messages[indexPath.row].chat
+        }
+        onSelect?(opened)
+    }
+
+    // MARK: Rows
+
+    private var isDark: Bool {
+        return tableView.traitCollection.userInterfaceStyle == .dark
+    }
+
+    private func addSeparator(to content: UIView, leading: CGFloat) {
+        let line = UIView()
+        line.backgroundColor = UIColor.separator
+        content.addSubview(line)
+        line.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            line.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: leading),
+            line.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            line.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            line.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale)
+        ])
+    }
+
+    private func avatar(_ name: String, placeholder: String, side: CGFloat, indexPath: IndexPath) -> UIImageView {
+        let picture = UIImageView(frame: CGRect(x: 0, y: 0, width: side, height: side))
+        picture.contentMode = .scaleAspectFill
+        picture.layer.cornerRadius = side / 2
+        picture.clipsToBounds = true
+        picture.image = UIImage(named: placeholder, in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        if !name.isEmpty {
+            getImage(name: name, placeholderImage: picture.image, isCircle: true, tableView: tableView,
+                     indexPath: indexPath, targetSize: CGSize(width: side, height: side)) { _, _, image in
+                picture.image = image
+            }
+        }
+        return picture
+    }
+
+    private func dateLabel(_ serverDate: String) -> UILabel {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 14 + String.offset())
+        label.textColor = .secondaryLabel
+        label.text = Self.spokenDate(serverDate)
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        return label
+    }
+
+    /// Today by the time, yesterday by name, this week by the day, and the rest by the date -
+    /// the way the chat list writes them.
+    private static func spokenDate(_ serverDate: String) -> String {
+        guard let millis = Int64(serverDate), millis > 0 else {
+            return ""
+        }
+        let date = Date(milliseconds: millis)
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
+            return DateFormatterPool.shared.string(from: date, format: "HH:mm", localeIdentifier: "id")
+        }
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date),
+                                           to: calendar.startOfDay(for: Date())).day ?? 0
+        if days == 1 {
+            return "Yesterday".localized()
+        }
+        if days < 7 {
+            let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
+            return DateFormatterPool.shared.string(from: date, format: "EEEE", localeIdentifier: lang == "id" ? "id" : nil)
+        }
+        return DateFormatterPool.shared.string(from: date, format: "dd/MM/yy", localeIdentifier: "id")
+    }
+
+    private func buildChatRow(in cell: UITableViewCell, found: Found, indexPath: IndexPath) {
+        let content = cell.contentView
+        let chat = found.chat
+        let isPerson = chat.groupId.isEmpty
+        let picture = avatar(chat.profile, placeholder: isPerson ? "Profile---Black" : "group-chat", side: 52, indexPath: indexPath)
+        let name = UILabel()
+        name.attributedText = ChatSearchMatch.emphasized(found.title, query: query,
+                                                         font: .systemFont(ofSize: 16 + String.offset(), weight: .semibold),
+                                                         colour: .label)
+        name.lineBreakMode = .byTruncatingTail
+        let date = dateLabel(chat.serverDate)
+        let preview = UILabel()
+        preview.numberOfLines = 2
+        preview.font = .systemFont(ofSize: 14 + String.offset())
+        preview.textColor = .secondaryLabel
+        let shown = chat.copy()
+        shown.messageText = found.text
+        if let text = Utils.previewMessageText(chat: shown) as? NSAttributedString {
+            let grey = NSMutableAttributedString(attributedString: text)
+            grey.addAttribute(.foregroundColor, value: UIColor.secondaryLabel, range: NSRange(location: 0, length: grey.length))
+            preview.attributedText = grey.endingInEllipsis()
+        } else {
+            preview.text = found.text
+        }
+        [picture, name, date, preview].forEach {
+            content.addSubview($0)
+            $0.translatesAutoresizingMaskIntoConstraints = false
+        }
+        NSLayoutConstraint.activate([
+            picture.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            picture.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            picture.widthAnchor.constraint(equalToConstant: 52),
+            picture.heightAnchor.constraint(equalToConstant: 52),
+            picture.topAnchor.constraint(greaterThanOrEqualTo: content.topAnchor, constant: 10),
+            name.leadingAnchor.constraint(equalTo: picture.trailingAnchor, constant: 12),
+            name.topAnchor.constraint(equalTo: content.topAnchor, constant: 12),
+            name.trailingAnchor.constraint(lessThanOrEqualTo: date.leadingAnchor, constant: -8),
+            date.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            date.firstBaselineAnchor.constraint(equalTo: name.firstBaselineAnchor),
+            preview.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+            preview.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            preview.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 2),
+            preview.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -12),
+            content.heightAnchor.constraint(greaterThanOrEqualToConstant: 76)
+        ])
+        addSeparator(to: content, leading: 80)
+    }
+
+    private func buildContactRow(in cell: UITableViewCell, user: User, indexPath: IndexPath) {
+        let content = cell.contentView
+        let picture = avatar(user.thumb, placeholder: "Profile---Black", side: 40, indexPath: indexPath)
+        let name = UILabel()
+        name.attributedText = ChatSearchMatch.emphasized(user.fullName, query: query,
+                                                         font: .systemFont(ofSize: 16 + String.offset()),
+                                                         colour: .label)
+        [picture, name].forEach {
+            content.addSubview($0)
+            $0.translatesAutoresizingMaskIntoConstraints = false
+        }
+        NSLayoutConstraint.activate([
+            picture.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            picture.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            picture.widthAnchor.constraint(equalToConstant: 40),
+            picture.heightAnchor.constraint(equalToConstant: 40),
+            name.leadingAnchor.constraint(equalTo: picture.trailingAnchor, constant: 16),
+            name.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -16),
+            name.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            content.heightAnchor.constraint(greaterThanOrEqualToConstant: 56)
+        ])
+        addSeparator(to: content, leading: 72)
+    }
+
+    /// A message found: its conversation and when, then who said it and the words around what
+    /// was searched for - lit the way WhatsApp lights them - with a picture's thumbnail beside
+    /// it and a link's card under it.
+    private func buildMessageRow(in cell: UITableViewCell, found: Found, starred: Bool) {
+        let content = cell.contentView
+        let chat = found.chat
+        let title = UILabel()
+        title.attributedText = ChatSearchMatch.emphasized(found.title, query: query,
+                                                          font: .systemFont(ofSize: 16 + String.offset(), weight: .semibold),
+                                                          colour: .secondaryLabel)
+        title.lineBreakMode = .byTruncatingTail
+        let date = dateLabel(chat.serverDate)
+
+        let bodyFont = UIFont.systemFont(ofSize: 14 + String.offset())
+        let body = NSMutableAttributedString()
+        if !found.sender.isEmpty {
+            // Lit too: a search for someone's name finds what they wrote with their name lit
+            // where it heads the words, the way the reference shows "Faisal SI:".
+            // In medium, the weight the chat list writes a sender in.
+            body.append(ChatSearchMatch.emphasized(found.sender + ": ", query: query,
+                                                   font: .systemFont(ofSize: bodyFont.pointSize, weight: .medium),
+                                                   colour: .secondaryLabel))
+        }
+        let hasPicture = !chat.image.isEmpty || !chat.video.isEmpty
+        if hasPicture {
+            let camera = NSTextAttachment()
+            camera.image = UIImage(systemName: chat.video.isEmpty ? "camera.fill" : "video.fill")?
+                .withTintColor(.secondaryLabel, renderingMode: .alwaysOriginal)
+            camera.bounds = CGRect(x: 0, y: -2, width: 16, height: 12)
+            body.append(NSAttributedString(attachment: camera))
+            body.append(NSAttributedString(string: " ", attributes: [.font: bodyFont]))
+        }
+        // Drawn the way the bubble draws it - *bold*, _italic_, ~struck~ and the rest, the marks
+        // themselves gone - then greyed, then lit. Fix: the words were set as plain text, marks
+        // and all, so a release note read "*Release UCPaaS & OneApp-6.0.8*" with its asterisks.
+        // Built here, on the main thread and outside any transaction, because rendering a
+        // mention reads the database.
+        let words = NSMutableAttributedString(attributedString:
+            ChatSearchMatch.snippet(found.text, query: query).richText(fontSize: bodyFont.pointSize))
+        let whole = NSRange(location: 0, length: words.length)
+        words.addAttribute(.foregroundColor, value: UIColor.secondaryLabel, range: whole)
+        words.removeAttribute(.backgroundColor, range: whole)
+        words.removeAttribute(.link, range: whole)
+        body.append(ChatSearchMatch.highlighted(words, query: query))
+        let text = UILabel()
+        text.numberOfLines = 3
+        text.lineBreakMode = .byTruncatingTail
+        text.attributedText = body
+
+        [title, date, text].forEach {
+            content.addSubview($0)
+            $0.translatesAutoresizingMaskIntoConstraints = false
+        }
+        var constraints = [
+            title.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            title.topAnchor.constraint(equalTo: content.topAnchor, constant: 12),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: date.leadingAnchor, constant: -8),
+            date.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            date.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor),
+            text.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            text.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 2)
+        ]
+        var lowest: UIView = text
+
+        if starred {
+            let star = UIImageView(image: UIImage(systemName: "star.fill"))
+            star.tintColor = .tertiaryLabel
+            star.contentMode = .scaleAspectFit
+            content.addSubview(star)
+            star.translatesAutoresizingMaskIntoConstraints = false
+            constraints += [
+                star.trailingAnchor.constraint(equalTo: date.trailingAnchor),
+                star.topAnchor.constraint(equalTo: date.bottomAnchor, constant: 4),
+                star.widthAnchor.constraint(equalToConstant: 14),
+                star.heightAnchor.constraint(equalToConstant: 14)
+            ]
+        }
+
+        let thumbName = chat.thumb
+        if hasPicture && !thumbName.isEmpty {
+            let thumb = UIImageView()
+            thumb.contentMode = .scaleAspectFill
+            thumb.clipsToBounds = true
+            thumb.layer.cornerRadius = 4
+            thumb.backgroundColor = isDark ? UIColor.white.withAlphaComponent(0.08) : UIColor.black.withAlphaComponent(0.05)
+            content.addSubview(thumb)
+            thumb.translatesAutoresizingMaskIntoConstraints = false
+            constraints += [
+                thumb.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+                thumb.topAnchor.constraint(equalTo: text.topAnchor, constant: 2),
+                thumb.widthAnchor.constraint(equalToConstant: 52),
+                thumb.heightAnchor.constraint(equalToConstant: 52),
+                text.trailingAnchor.constraint(equalTo: thumb.leadingAnchor, constant: -10),
+                content.bottomAnchor.constraint(greaterThanOrEqualTo: thumb.bottomAnchor, constant: 12)
+            ]
+            Self.loadThumbnail(named: thumbName, into: thumb, picture: chat.image)
+        } else {
+            constraints.append(text.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16))
+        }
+
+        if let link = Self.firstLink(in: found.text) {
+            let card = linkCard(for: link)
+            content.addSubview(card)
+            card.translatesAutoresizingMaskIntoConstraints = false
+            constraints += [
+                card.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+                card.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+                card.topAnchor.constraint(equalTo: text.bottomAnchor, constant: 8)
+            ]
+            lowest = card
+        }
+        constraints.append(lowest.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12))
+        NSLayoutConstraint.activate(constraints)
+        addSeparator(to: content, leading: 16)
+    }
+
+    /// The first address in the words, as it is written there.
+    private static func firstLink(in text: String) -> String? {
+        guard let range = String.urlRanges(in: text).first else {
+            return nil
+        }
+        return (text as NSString).substring(with: range)
+    }
+
+    /// The card a link is shown with: its picture - or a compass where there is none - and its
+    /// title or its address, over the site it is on. Only what the conversation already learned
+    /// about the link is drawn; nothing is fetched for a row in a list that scrolls.
+    private func linkCard(for link: String) -> UIView {
+        let card = UIView()
+        card.backgroundColor = isDark ? UIColor.white.withAlphaComponent(0.08) : UIColor.black.withAlphaComponent(0.04)
+        card.layer.cornerRadius = 12
+        card.clipsToBounds = true
+
+        let picture = UIImageView()
+        picture.clipsToBounds = true
+        picture.backgroundColor = isDark ? UIColor.white.withAlphaComponent(0.06) : UIColor.black.withAlphaComponent(0.04)
+        picture.image = UIImage(systemName: "safari.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 28))
+        picture.tintColor = .secondaryLabel
+        picture.contentMode = .center
+
+        let heading = UILabel()
+        heading.font = .systemFont(ofSize: 13 + String.offset(), weight: .semibold)
+        heading.textColor = .label
+        heading.numberOfLines = 2
+        let site = UILabel()
+        site.font = .systemFont(ofSize: 12 + String.offset())
+        site.textColor = .secondaryLabel
+
+        var facts: LinkPreviewFacts?
+        let known: LinkPreviewStore.Answer
+        if let held = linkAnswers[link] {
+            known = held
+        } else {
+            var answer = LinkPreviewStore.answer(link: link)
+            if case .notAsked = answer, !link.lowercased().hasPrefix("http") {
+                answer = LinkPreviewStore.answer(link: "https://" + link)
+            }
+            known = answer
+            linkAnswers[link] = answer
+        }
+        if case .read(let read) = known {
+            facts = read
+        }
+        // Grey like the rest of the row, with only what was searched for in the text colour.
+        // Fix: the whole title was drawn in the text colour, so every link card read as lit
+        // whether or not it held anything that was searched for.
+        heading.attributedText = ChatSearchMatch.emphasized((facts?.title.isEmpty ?? true) ? link : (facts?.title ?? link),
+                                                            query: query, font: heading.font, colour: .secondaryLabel)
+        var host = facts?.domain ?? ""
+        if host.isEmpty {
+            host = (URL(string: link.lowercased().hasPrefix("http") ? link : "https://" + link)?.host ?? "").lowercased()
+            if host.hasPrefix("www.") {
+                host = String(host.dropFirst(4))
+            }
+        }
+        site.text = host
+        if let address = facts?.imageUrl, !address.isEmpty {
+            LinkPreviewImage.onDisk(address) { [weak picture] image in
+                guard let image = image, let picture = picture else {
+                    return
+                }
+                picture.contentMode = .scaleAspectFill
+                picture.image = image
+            }
+        }
+
+        let words = UIStackView(arrangedSubviews: [heading, site])
+        words.axis = .vertical
+        words.spacing = 2
+        [picture, words].forEach {
+            card.addSubview($0)
+            $0.translatesAutoresizingMaskIntoConstraints = false
+        }
+        NSLayoutConstraint.activate([
+            picture.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            picture.topAnchor.constraint(equalTo: card.topAnchor),
+            picture.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            picture.widthAnchor.constraint(equalToConstant: 72),
+            picture.heightAnchor.constraint(equalToConstant: 72),
+            words.leadingAnchor.constraint(equalTo: picture.trailingAnchor, constant: 12),
+            words.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
+            words.centerYAnchor.constraint(equalTo: card.centerYAnchor)
+        ])
+        return card
+    }
+
+    /// The stored thumbnail of a message, from wherever it lives on the device. One that is not
+    /// here yet is fetched, and shows the next time its row is drawn.
+    private static func loadThumbnail(named thumb: String, into imageView: UIImageView, picture image: String = "") {
+        if let cached = Nexilis.imageCache.object(forKey: thumb as NSString) {
+            imageView.image = cached
+            return
+        }
+        var data: Data?
+        if FileEncryption.shared.isSecureExists(filename: thumb) {
+            if var secure = try? FileEncryption.shared.readSecure(filename: thumb) {
+                if let decrypted = FileEncryption.shared.decryptFileFromServer(data: secure) {
+                    secure = decrypted
+                }
+                data = secure
+            }
+        } else if let dirPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first {
+            data = try? Data(contentsOf: URL(fileURLWithPath: dirPath).appendingPathComponent(thumb))
+        }
+        guard let data = data, let image = UIImage(data: data)?.resize(target: CGSize(width: 200, height: 200)) else {
+            // No thumbnail that can be shown, and the picture is here: it stands in - see
+            // ThumbnailFallback.
+            if ThumbnailFallback.isOnDevice(image) {
+                ThumbnailFallback.load(fromImage: image, as: thumb) { [weak imageView] picture in
+                    if let picture = picture { imageView?.image = picture }
+                }
+                return
+            }
+            if !Download.isDownloading(forKey: thumb) {
+                Download().startHTTP(forKey: thumb) { _, _ in }
+            }
+            return
+        }
+        Nexilis.imageCache.setObject(image, forKey: thumb as NSString)
+        imageView.image = image
     }
 }

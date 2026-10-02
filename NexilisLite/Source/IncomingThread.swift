@@ -380,16 +380,22 @@ class IncomingThread {
     }
     
     private func sendOnlineUser(message: TMessage) -> Void {
-//        DispatchQueue.main.async {
-//            if !APIS.checkAppStateisBackground() {
-//                let fPIn = message.getPIN()
-//                if let packetId = message.mBodies[CoreMessage_TMessageKey.PACKET_ID] {
-//                    if fPIn != User.getMyPin() {
-//                        _ = Nexilis.responseString(packetId: packetId, message: "01", timeout: 3000)
-//                    }
-//                }
-//            }
-//        }
+        // Restore the online SDK handshake. A background/suspended app must still
+        // use the VoIP push fallback; do not suppress it just because a socket exists.
+        NexilisCallDiagnostics.record("online.probe.received")
+        DispatchQueue.main.async {
+            guard !APIS.checkAppStateisBackground(), let me = User.getMyPin(),
+                  !message.getPIN().isEmpty, message.getPIN() != me,
+                  let packetId = message.mBodies[CoreMessage_TMessageKey.PACKET_ID], !packetId.isEmpty else {
+                NexilisCallDiagnostics.record("online.probe.skip background=\(APIS.checkAppStateisBackground()) user=\(User.getMyPin() != nil) sender_empty=\(message.getPIN().isEmpty) sender_self=\(message.getPIN() == User.getMyPin()) packet=\(message.mBodies[CoreMessage_TMessageKey.PACKET_ID]?.isEmpty == false)")
+                return
+            }
+            DispatchQueue.global(qos: .userInitiated).async {
+                NexilisCallDiagnostics.record("online.probe.reply.begin code=01")
+                let response = Nexilis.responseString(packetId: packetId, message: "01", timeout: 3000)
+                NexilisCallDiagnostics.record("online.probe.reply.end returned=\(response != nil)")
+            }
+        }
     }
     
     private func notifyCalling(message: TMessage) -> Void {
@@ -451,73 +457,12 @@ class IncomingThread {
     }
     
     private func incomingCallCC(message: TMessage) {
+        // 01 is signaling readiness, not consent to join the room.
         if let packetId = message.mBodies[CoreMessage_TMessageKey.PACKET_ID] {
             _ = Nexilis.responseString(packetId: packetId, message: "01")
         }
         ack(message: message)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: {
-            let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
-            let channelCC: String = SecureUserDefaults.shared.value(forKey: "channelCC") ?? ""
-            if onGoingCC.isEmpty || channelCC.isEmpty || (!onGoingCC.isEmpty && onGoingCC.components(separatedBy: ",").count < 3) {
-                SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
-                SecureUserDefaults.shared.removeValue(forKey: "channelCC")
-                return
-            }
-            let complaintId = onGoingCC.component(2, separatedBy: ",")
-            let fPinCC = onGoingCC.component(1, separatedBy: ",")
-            if fPinCC == User.getMyPin() {
-                return
-            }
-            if channelCC == "1" {
-                let controller = QmeraAudioViewController()
-                controller.isOutgoing = false
-                controller.user = User.getData(pin: fPinCC)
-                controller.ticketId = complaintId
-                controller.modalPresentationStyle = .overCurrentContext
-                if UIApplication.shared.visibleViewController is UIAlertController {
-                    let vc = UIApplication.shared.visibleViewController as! UIAlertController
-                    vc.dismiss(animated: true, completion: {
-                        if UIApplication.shared.visibleViewController?.navigationController != nil {
-                            UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
-                        } else {
-                            UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
-                        }
-                    })
-                    return
-                }
-                if UIApplication.shared.visibleViewController?.navigationController != nil {
-                    UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
-                } else {
-                    UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
-                }
-            } else if channelCC == "2" {
-                let videoController = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
-                let user = User.getData(pin: fPinCC)
-                videoController.fPin = user!.pin
-                videoController.isInisiator = false
-                videoController.users.append(user!)
-                videoController.isAutoAccept = true
-                videoController.ticketId = complaintId
-                let navigationController = CustomNavigationController(rootViewController: videoController)
-                navigationController.modalPresentationStyle = .fullScreen
-                if UIApplication.shared.visibleViewController is UIAlertController {
-                    let vc = UIApplication.shared.visibleViewController as! UIAlertController
-                    vc.dismiss(animated: true, completion: {
-                        if UIApplication.shared.visibleViewController?.navigationController != nil {
-                            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                        } else {
-                            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                        }
-                    })
-                    return
-                }
-                if UIApplication.shared.visibleViewController?.navigationController != nil {
-                    UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                } else {
-                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                }
-            }
-        })
+        DispatchQueue.main.async { ContactCenterSession.shared.incoming(message) }
     }
     
     private func incomingWBSS(message: TMessage) {
@@ -719,6 +664,7 @@ class IncomingThread {
     }
     
     private func handleCallCenter(message: TMessage) -> Void {
+        DispatchQueue.main.async { ContactCenterSession.shared.receive(message) }
         if let delegate = Nexilis.shared.messageDelegate {
             delegate.onReceive(message: message)
         }
@@ -1651,7 +1597,7 @@ class IncomingThread {
                         }
                         _ = try Database.shared.insertRecord(fmdb: fmdb, table: "CALL_CENTER_HISTORY", cvalues: [
                             "type" : "0",
-                            "title" : "Contact Center".localized(),
+                            "title" : "Call Center".localized(),
                             "time" : startTimeCC,
                             "f_pin" : officer,
                             "data" : complaintId,

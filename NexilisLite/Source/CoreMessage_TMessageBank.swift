@@ -1917,7 +1917,8 @@ public class CoreMessage_TMessageBank {
         return tmessage
     }
     
-    public static func endCallCenter(complaint_id:String, l_pin: String) -> TMessage {
+    /// `status` is how the session ended, as Android sends it: "0" Completed, "1" Pending.
+    public static func endCallCenter(complaint_id:String, l_pin: String, status: String = "0") -> TMessage {
         let me = User.getMyPin()!
         let tmessage = TMessage()
         tmessage.mCode = CoreMessage_TMessageCode.END_CALL_CENTER
@@ -1926,6 +1927,7 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.F_PIN] = me
         tmessage.mBodies[CoreMessage_TMessageKey.L_PIN] = l_pin
         tmessage.mBodies[CoreMessage_TMessageKey.DATA] = complaint_id
+        tmessage.mBodies[CoreMessage_TMessageKey.STATUS] = status
         return tmessage
     }
     

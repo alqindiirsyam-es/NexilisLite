@@ -56,7 +56,7 @@ class AddFriendTableViewController: UITableViewController {
         navigationController?.navigationBar.standardAppearance = navBarAppearance
         navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
         
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancel(sender:)))
+        navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(cancel(sender:)))
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Scan QR".localized(), style: .plain, target: self, action: #selector(scanQR(sender:)))
         
         searchController = UISearchController(searchResultsController: nil)
@@ -111,12 +111,12 @@ class AddFriendTableViewController: UITableViewController {
                     }
                     if let response = Nexilis.writeAndWait(message: dataMessage, timeout: 1000 * 30) {
                         if response.isOk() {
-                            let alert = UIAlertController(title: "Action Successful".localized(), message: Nexilis.checkingAccess(key: "friend_request_approval") ? "Friend request has been sent".localized() : "Successfully added a new friend".localized(), preferredStyle: .alert)
+                            let alert = LibAlertController(title: "Action Successful".localized(), message: Nexilis.checkingAccess(key: "friend_request_approval") ? "Friend request has been sent".localized() : "Successfully added a new friend".localized(), preferredStyle: .alert)
                             alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
                             self.present(alert, animated: true, completion: nil)
                         }
                         else {
-                            let alert = UIAlertController(title: "Failed".localized(), message: "QR Code is Invalid or Friend is not found".localized(), preferredStyle: .alert)
+                            let alert = LibAlertController(title: "Failed".localized(), message: "QR Code is Invalid or Friend is not found".localized(), preferredStyle: .alert)
                             alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
                             self.present(alert, animated: true, completion: nil)
                         }

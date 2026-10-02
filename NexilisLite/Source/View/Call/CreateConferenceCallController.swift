@@ -83,7 +83,7 @@ public class CreateConferenceCallController: UITableViewController {
         
         title = "Conference Call".localized()
         
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(didTapCancel(sender:)))
+        navigationItem.leftBarButtonItem = .libCancel(target: self, action: #selector(didTapCancel(sender:)))
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Start".localized(), style: .plain, target: self, action: #selector(didTapRight(sender:)))
         
         descriptionView.delegate = self
