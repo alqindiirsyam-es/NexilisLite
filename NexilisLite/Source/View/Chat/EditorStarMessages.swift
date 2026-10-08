@@ -2595,7 +2595,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             return
         }
         DispatchQueue.global().async {
@@ -2619,7 +2619,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         if row != nil && section != nil {
                             self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                         }
-                        self.view.makeToast("Confirmation Success.".localized(), duration: 3)
+                        self.view.presentToast("Confirmation Success.".localized(), duration: 3)
                     }
                 }
             }
@@ -3391,7 +3391,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     text = text + "\n\n\nchat " + "Powered by Nexilis".localized()
                     DispatchQueue.main.async {
                         UIPasteboard.general.string = text
-                        self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
+                        self.view.presentToast("Text coppied to clipboard".localized(), duration: 3)
                     }
                 }
             } else {
@@ -3404,7 +3404,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         if FileManager.default.fileExists(atPath: imageURL.path) {
                             let image    = UIImage(contentsOfFile: imageURL.path)
                             UIPasteboard.general.image = image
-                            self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
+                            self.view.presentToast("Image coppied to clipboard".localized(), duration: 3)
                         } else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                             do {
                                 if var imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
@@ -3414,7 +3414,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                                     }
                                     let image    = UIImage(data: imageData)
                                     UIPasteboard.general.image = image
-                                    self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
+                                    self.view.presentToast("Image coppied to clipboard".localized(), duration: 3)
                                 }
                             } catch {
                                 
@@ -3465,7 +3465,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     handler: {(_) in if (index == 0) {
                         DispatchQueue.main.async {
                             UIPasteboard.general.string = dataMessages[indexPath.row]["message_text"] as? String
-                            self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
+                            self.view.presentToast("Text coppied to clipboard".localized(), duration: 3)
                         }
                     } else {
                         DispatchQueue.main.async {
@@ -3477,7 +3477,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                                 if FileManager.default.fileExists(atPath: imageURL.path) {
                                     let image    = UIImage(contentsOfFile: imageURL.path)
                                     UIPasteboard.general.image = image
-                                    self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
+                                    self.view.presentToast("Image coppied to clipboard".localized(), duration: 3)
                                 } else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                     do {
                                         if var imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
@@ -3487,7 +3487,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                                             }
                                             let image    = UIImage(data: imageData)
                                             UIPasteboard.general.image = image
-                                            self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
+                                            self.view.presentToast("Image coppied to clipboard".localized(), duration: 3)
                                         }
                                     } catch {
                                         
@@ -3552,7 +3552,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         let message = Nexilis.checkingAccessAlert(key: "live_streaming").component(1, separatedBy: "|")
                         APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
                     } else {
-                        UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                        UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
                     }
                     return
                 }
@@ -3581,7 +3581,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         let message = Nexilis.checkingAccessAlert(key: "vconf_room").component(1, separatedBy: "|")
                         APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
                     } else {
-                        UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                        UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
                     }
                     return
                 }
@@ -3700,7 +3700,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         }
         let copyAction: () -> Void = { [weak self] in
             UIPasteboard.general.string = urlString
-            self?.view.makeToast("Link Copied".localized(), duration: 3)
+            self?.view.presentToast("Link Copied".localized(), duration: 3)
         }
         let chromeOpenURL = LinkHighlighting.chromeURL(for: urlString)
         let chromeInstalled = chromeOpenURL.map { UIApplication.shared.canOpenURL($0) } ?? false

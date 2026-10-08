@@ -231,7 +231,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                 imageView.tintColor = .white
                 let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                banner.show()
+                banner.showOnScreen()
                 return
             }
             isBackupStart = true
@@ -250,7 +250,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                 imageView.tintColor = .white
                 let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                banner.show()
+                banner.showOnScreen()
                 return
             }
             isRestoreStart = true
@@ -706,7 +706,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
         } catch {
             RestoreProgressManager.shared.finish()
             DispatchQueue.main.async { [self] in
-                view.makeToast("Backup files are corrupted".localized(), duration: 3)
+                view.presentToast("Backup files are corrupted".localized(), duration: 3)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: { [self] in
                 isRestoreStart = false

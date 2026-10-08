@@ -388,7 +388,7 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             return
         }
         showActivityIndicatory()
@@ -609,14 +609,14 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
                     let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Broadcast Message Sent".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     self.navigationController?.presentingViewController?.dismiss(animated: true)
                 }
             } else {
                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                 imageView.tintColor = .white
                 let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                banner.show()
+                banner.showOnScreen()
                 self.loadingView.dismiss(animated: true)
             }
         }

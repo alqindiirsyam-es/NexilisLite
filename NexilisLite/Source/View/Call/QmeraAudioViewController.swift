@@ -413,7 +413,7 @@ class QmeraAudioViewController: UIViewController {
                                     colors: nil,
                                     iconPosition: .center
                                 )
-                                banner.show()
+                                banner.showOnScreen()
                             }
                         }
                     }.value
@@ -560,7 +560,7 @@ class QmeraAudioViewController: UIViewController {
                                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                banner.show()
+                                banner.showOnScreen()
                             }
                         }
                     }
@@ -954,7 +954,7 @@ class QmeraAudioViewController: UIViewController {
                 let message = Nexilis.checkingAccessAlert(key: "audio_call_add").component(1, separatedBy: "|")
                 APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
             } else {
-                UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
             }
             return
         }
@@ -989,7 +989,7 @@ class QmeraAudioViewController: UIViewController {
                                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                banner.show()
+                                banner.showOnScreen()
                             }
                         }
                     }
@@ -1107,7 +1107,7 @@ class QmeraAudioViewController: UIViewController {
                             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                             imageView.tintColor = .white
                             let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                            banner.show()
+                            banner.showOnScreen()
                         }
                     }
                 }
@@ -1445,7 +1445,7 @@ class QmeraAudioViewController: UIViewController {
                                     let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
                                     imageView.tintColor = .white
                                     let banner = FloatingNotificationBanner(title: "Call Center Session has ended".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
-                                    banner.show()
+                                    banner.showOnScreen()
                                 }
                                 self.timer?.invalidate()
                                 self.timer = nil
@@ -1476,7 +1476,7 @@ class QmeraAudioViewController: UIViewController {
                                 let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Call Center Session has ended".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
-                                banner.show()
+                                banner.showOnScreen()
                             }
                             self.timer?.invalidate()
                             self.timer = nil

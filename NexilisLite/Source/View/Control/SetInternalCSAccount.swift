@@ -122,7 +122,7 @@ public class SetInternalCSAccount: UITableViewController {
                                 let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Successfully changed".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                                banner.show()
+                                banner.showOnScreen()
                                 self.getData { users in
                                     self.availableUser.removeAll()
                                     self.availableUser.append(contentsOf: users)
@@ -137,7 +137,7 @@ public class SetInternalCSAccount: UITableViewController {
                                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Unable to access servers".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                                banner.show()
+                                banner.showOnScreen()
                                 Nexilis.hideLoader {}
                             }
                         }
@@ -146,7 +146,7 @@ public class SetInternalCSAccount: UITableViewController {
                             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                             imageView.tintColor = .white
                             let banner = FloatingNotificationBanner(title: "Unable to access servers".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                            banner.show()
+                            banner.showOnScreen()
                         }
                     }
                 } catch {
@@ -171,7 +171,7 @@ public class SetInternalCSAccount: UITableViewController {
                                 let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Successfully changed".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                                banner.show()
+                                banner.showOnScreen()
                                 self.getData { users in
                                     self.availableUser.removeAll()
                                     self.availableUser.append(contentsOf: users)
@@ -186,7 +186,7 @@ public class SetInternalCSAccount: UITableViewController {
                                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Unable to access servers".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                                banner.show()
+                                banner.showOnScreen()
                                 Nexilis.hideLoader {}
                             }
                         }
@@ -195,7 +195,7 @@ public class SetInternalCSAccount: UITableViewController {
                             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                             imageView.tintColor = .white
                             let banner = FloatingNotificationBanner(title: "Unable to access servers".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                            banner.show()
+                            banner.showOnScreen()
                         }
                     }
                 } catch {
@@ -259,7 +259,7 @@ public class SetInternalCSAccount: UITableViewController {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             return
         }
         let user: User

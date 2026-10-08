@@ -93,7 +93,7 @@ class GroupCreateViewController: UITableViewController, UITextFieldDelegate {
                         }
                     }
                 } else {
-                    self.view.makeToast("Server busy, please try again later".localized(), duration: 3)
+                    self.view.presentToast("Server busy, please try again later".localized(), duration: 3)
                 }
             }
         }

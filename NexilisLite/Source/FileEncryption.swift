@@ -15,8 +15,64 @@ import NexilisZTA
 
 public class FileEncryption {
     
-    public var aesKey: SymmetricKey?
-    public var aesIV: Data?
+    /// The server's secure-folder key and IV, held the way Android holds them: each as its
+    /// base64 text cut into four pieces kept in four separate places, and put back together only
+    /// at the moment it is used (SecureFileUtil.AESEncryptDecrypt AK1..AK4 / AV1..AV4). Nothing in
+    /// memory holds the whole of either between uses.
+    private let keyPartsLock = NSLock()
+    private var ak1 = "", ak2 = "", ak3 = "", ak4 = ""
+    private var av1 = "", av2 = "", av3 = "", av4 = ""
+
+    public var aesKey: SymmetricKey? {
+        get {
+            keyPartsLock.lock()
+            let text = ak1 + ak2 + ak3 + ak4
+            keyPartsLock.unlock()
+            guard !text.isEmpty, let data = Data(base64Encoded: text) else {
+                return nil
+            }
+            return SymmetricKey(data: data)
+        }
+        set {
+            let text = newValue.map { key in key.withUnsafeBytes { Data($0) }.base64EncodedString() } ?? ""
+            let parts = FileEncryption.fourParts(text)
+            keyPartsLock.lock()
+            (ak1, ak2, ak3, ak4) = parts
+            keyPartsLock.unlock()
+        }
+    }
+
+    public var aesIV: Data? {
+        get {
+            keyPartsLock.lock()
+            let text = av1 + av2 + av3 + av4
+            keyPartsLock.unlock()
+            guard !text.isEmpty else {
+                return nil
+            }
+            return Data(base64Encoded: text)
+        }
+        set {
+            let parts = FileEncryption.fourParts(newValue?.base64EncodedString() ?? "")
+            keyPartsLock.lock()
+            (av1, av2, av3, av4) = parts
+            keyPartsLock.unlock()
+        }
+    }
+
+    /// Cuts `text` into four as Android's setAESKey/setAESIv do: three pieces of a quarter of its
+    /// length and the rest in the fourth, or all of it in the first when it is shorter than four.
+    private static func fourParts(_ text: String) -> (String, String, String, String) {
+        let characters = Array(text)
+        guard characters.count >= 4 else {
+            return (text, "", "", "")
+        }
+        let part = characters.count / 4
+        return (String(characters[0..<part]),
+                String(characters[part..<(part * 2)]),
+                String(characters[(part * 2)..<(part * 3)]),
+                String(characters[(part * 3)...]))
+    }
     
     public static let shared = FileEncryption()
 
@@ -35,6 +91,11 @@ public class FileEncryption {
 
     public func readSecure(filename: String, withoutBiometric: Bool = false) throws -> Data? {
         if Utils.getFeatureAccess().isEmpty {
+            return nil
+        }
+        // Offline in a mode whose keys are not kept on the device: nothing secure is read, as on
+        // Android (SecureFileUtil.isPreventOffline) - see OfflinePolicy.
+        if OfflinePolicy.isBlocking {
             return nil
         }
         let fileManager = FileManager.default

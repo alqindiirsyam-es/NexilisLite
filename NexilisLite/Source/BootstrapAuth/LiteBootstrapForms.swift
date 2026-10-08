@@ -871,10 +871,10 @@ final class LiteBootstrapTfaViewController: LiteBootstrapFormViewController {
         guard !identity.hsa || biometricPassed else { beginMfaAuthentication(); return }
         let secret = password.text ?? ""
         guard !secret.trimmingCharacters(in: .whitespaces).isEmpty else {
-            view.makeToast("Password cannot be empty.".localized(), duration: 2.0, position: .center); return
+            view.presentToast("Password cannot be empty.".localized(), duration: 2.0, position: .center); return
         }
         guard secret.count >= 6 else {
-            view.makeToast("Password must be at least 6 characters.".localized(), duration: 2.0, position: .center); return
+            view.presentToast("Password must be at least 6 characters.".localized(), duration: 2.0, position: .center); return
         }
         validate(secret)
     }
@@ -981,10 +981,10 @@ final class LiteBootstrapMiddleViewController: LiteBootstrapLoginViewController 
         }
         let typed = password.text ?? ""
         guard !typed.trimmingCharacters(in: .whitespaces).isEmpty else {
-            view.makeToast("Password cannot be empty.".localized(), duration: 2.0, position: .center); return
+            view.presentToast("Password cannot be empty.".localized(), duration: 2.0, position: .center); return
         }
         guard typed.count >= 6 else {
-            view.makeToast("Password must be at least 6 characters.".localized(), duration: 2.0, position: .center); return
+            view.presentToast("Password must be at least 6 characters.".localized(), duration: 2.0, position: .center); return
         }
         nickname = name
         secret = typed

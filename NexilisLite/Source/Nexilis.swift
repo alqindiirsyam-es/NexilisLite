@@ -38,7 +38,7 @@ enum NexilisCallDiagnostics {
 }
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "6.0.8"
+    public static var cpaasVersion = "6.0.9"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -164,6 +164,8 @@ public class Nexilis: NSObject {
     }
     
     public static func connect(apiKey: String, userId:String = "", delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
+        DispatchQueue.main.async { ToastPresenter.startWatchingKeyboard() }
+        ConnectionWatch.shared.start()
         // RIL: Lite's backend is one of the URLs RILProtection signs when the host's RIL opt-in
         // says ProtectNexilisLite. The base can change once connected, so it is read per request.
         // Uploads are left out - their bodies are files, over what a signature covers.
@@ -299,8 +301,6 @@ public class Nexilis: NSObject {
                 self.startConnect(showButton: showButton, apiKey: apiKey, delegate: delegate)
             }
         }
-        
-        NetworkMonitor.shared.startMonitoring()
         
         OutgoingThread.default.run()
         
@@ -878,6 +878,10 @@ public class Nexilis: NSObject {
     }
 
     static var isGettingFeatureAccess: Bool = false
+    /// Posted each time a pull of feature access - the secure folder's keys among it - finishes,
+    /// answered or not. ConnectionWatch checks then whether the keys made it (Android's
+    /// checkOfflineInvState waits on the same thing, ongoingPullFA).
+    static let featureAccessDidFinish = Notification.Name("io.nexilis.featureAccessDidFinish")
     static func getFeatureAccess() {
         if isGettingFeatureAccess {
             return
@@ -1012,6 +1016,7 @@ public class Nexilis: NSObject {
                                 }
                             }
                             isGettingFeatureAccess = false
+                            NotificationCenter.default.post(name: Nexilis.featureAccessDidFinish, object: nil)
                         }
                     }
                 } catch {
@@ -1020,6 +1025,7 @@ public class Nexilis: NSObject {
             } else {
                 print("gagal getfeatureaccess:")
                 isGettingFeatureAccess = false
+                NotificationCenter.default.post(name: Nexilis.featureAccessDidFinish, object: nil)
                 if Utils.getSecureFolderOffline() == "0" || (Utils.getSecureFolderOffline() == "1" && !Utils.getSetProfile()) {
                     // writeSync answers nil at once while the socket is down, and an immediate retry
                     // turned that into a busy loop - millions of attempts a minute, the CPU and the
@@ -1246,7 +1252,7 @@ public class Nexilis: NSObject {
                     let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Call Center Session has ended".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                 }
             }
         }
@@ -1687,7 +1693,7 @@ public class Nexilis: NSObject {
                         let message = Nexilis.checkingAccessAlert(key: "wallet").component(1, separatedBy: "|")
                         APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
                     } else {
-                        UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                        UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
                     }
                     return
                 }
@@ -1699,7 +1705,7 @@ public class Nexilis: NSObject {
                         let message = Nexilis.checkingAccessAlert(key: "ppob").component(1, separatedBy: "|")
                         APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
                     } else {
-                        UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                        UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
                     }
                     return
                 }
@@ -4784,7 +4790,7 @@ extension Nexilis: MessageDelegate {
                                     let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
                                     imageView.tintColor = .white
                                     let banner = FloatingNotificationBanner(title: "Call Center Session has ended".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
-                                    banner.show()
+                                    banner.showOnScreen()
                                 }
                             }
                         }
@@ -5855,7 +5861,8 @@ final class InAppBanner {
         }
         let card = makeCard(for: content)
         let banner = FloatingNotificationBanner(customView: card.view)
-        banner.bannerHeight = reservedTopSpacing + InAppBanner.cardHeight
+        let place = APIS.bannerPlacement(contentHeight: InAppBanner.cardHeight)
+        banner.bannerHeight = place.height
         banner.duration = InAppBanner.onScreen
         banner.haptic = .light
         banner.onTap = { [weak self] in
@@ -5872,7 +5879,9 @@ final class InAppBanner {
                     bannerPosition: .top,
                     queue: queue,
                     on: nil,
-                    edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0),
+                    // Below the Dynamic Island whatever the library made of the screen - see
+                    // APIS.bannerPlacement.
+                    edgeInsets: UIEdgeInsets(top: place.top, left: 8.0, bottom: 0, right: 8.0),
                     cornerRadius: 18.0,
                     shadowColor: .black,
                     shadowOpacity: 0.16,
@@ -6069,25 +6078,6 @@ final class InAppBanner {
             top = navigation.visibleViewController
         }
         return top is QmeraAudioViewController || top is QmeraVideoViewController
-    }
-
-    /// The strip the library keeps clear at the top for the status bar and the notch, which is
-    /// part of the height it is given. Worked out the way the library works it out, so the card
-    /// underneath is the size asked for rather than whatever is left over.
-    private var reservedTopSpacing: CGFloat {
-        let window = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap { $0.windows }
-            .first(where: { $0.isKeyWindow })
-        let insets = window?.safeAreaInsets ?? .zero
-        if insets.top > 50 {
-            return 44 + 16
-        }
-        if insets.bottom > 0 {
-            return 40
-        }
-        let statusBar = window?.windowScene?.statusBarManager?.statusBarFrame.height ?? 20
-        return 10 + statusBar
     }
 }
 

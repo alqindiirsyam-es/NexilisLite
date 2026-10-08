@@ -605,6 +605,8 @@ class ContactChatViewController: UITableViewController {
             self.contacts.removeAll()
             self.groups.removeAll()
             self.tableView.reloadData()
+            // Offline where the keys are not kept on the device: the list says why it is empty.
+            OfflinePolicy.applyEmptyState(to: self.tableView)
             self.reloadAllData()
         }
     }
@@ -1284,9 +1286,9 @@ extension ContactChatViewController {
                 exblock = exblock == nil ? "0" : exblock!.isEmpty ? "0" : exblock!
                 if exblock != "0" {
                     if exblock == "1" {
-                        self.view.makeToast("You blocked this user".localized(), duration: 3)
+                        self.view.presentToast("You blocked this user".localized(), duration: 3)
                     } else {
-                        self.view.makeToast("You have been blocked by this user".localized(), duration: 3)
+                        self.view.presentToast("You have been blocked by this user".localized(), duration: 3)
                     }
                     return
                 }
@@ -1324,9 +1326,9 @@ extension ContactChatViewController {
                     exblock = exblock == nil ? "0" : exblock!.isEmpty ? "0" : exblock!
                     if exblock != "0" {
                         if exblock == "1" {
-                            self.view.makeToast("You blocked this user".localized(), duration: 3)
+                            self.view.presentToast("You blocked this user".localized(), duration: 3)
                         } else {
-                            self.view.makeToast("You have been blocked by this user".localized(), duration: 3)
+                            self.view.presentToast("You have been blocked by this user".localized(), duration: 3)
                         }
                         return
                     }
@@ -1524,7 +1526,7 @@ extension ContactChatViewController {
                         navigationController?.show(editorGroupVC, sender: nil)
                         cursorMember.close()
                     } else {
-                        self.view.makeToast("You are not a member of this group".localized(), duration: 3)
+                        self.view.presentToast("You are not a member of this group".localized(), duration: 3)
                     }
                 } catch {
                     rollback.pointee = true
@@ -1926,32 +1928,65 @@ extension ContactChatViewController {
         }
     }
 
-    override func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        if segment.numberOfSegments != 3 || (segment.numberOfSegments == 3 && segment.selectedSegmentIndex != 0) {
+    /// The conversation a swipe on this row is about, when the row is one that can be swiped.
+    ///
+    /// Only conversations, on the Chats segment, and only rows that are really there: the list
+    /// reloads on every incoming message, so an index from a moment ago can already be past the
+    /// end - the old `as!` and unchecked subscript here crashed on exactly that.
+    private func swipeableChat(at indexPath: IndexPath) -> Chat? {
+        guard segment.numberOfSegments == 3, segment.selectedSegmentIndex == 0 else {
             return nil
         }
         let data: Chat
         if isFiltering {
-            if fillteredData.count == 0 {
+            guard indexPath.row < fillteredData.count, let chat = fillteredData[indexPath.row] as? Chat else {
                 return nil
             }
-            data = fillteredData[indexPath.row] as! Chat
+            data = chat
         } else {
-            if chats.count == 0 {
+            guard indexPath.row < chats.count else {
                 return nil
             }
             data = chats[indexPath.row]
         }
-        if !data.isParent && segment.selectedSegmentIndex == 0 {
-            if self.archivedChats.count > 0 && indexPath.row == 0 {
-                return nil
-            }
-            let archiveAction = UIContextualAction(style: .normal, title: nil) { (_, _, completionHandler) in
+        guard !data.isParent, !(archivedChats.count > 0 && indexPath.row == 0) else {
+            return nil
+        }
+        return data
+    }
+
+    /// Swiping left offers delete, the way the Chats tab does.
+    ///
+    /// Fix: this list had no trailing actions at all, so the swipe that deletes a conversation on
+    /// the Chats tab did nothing here.
+    override func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard let data = swipeableChat(at: indexPath) else {
+            return nil
+        }
+        let clearAction = UIContextualAction(style: .normal, title: nil) { (_, _, completionHandler) in
+            self.deleteConversation(data)
+            completionHandler(true)
+        }
+        clearAction.backgroundColor = .red
+        clearAction.image = UIImage(systemName: "trash.fill")
+        return UISwipeActionsConfiguration(actions: [clearAction])
+    }
+
+    override func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard let data = swipeableChat(at: indexPath) else {
+            return nil
+        }
+        do {
+            // Fix: the icons were pictures with their labels drawn into them, and Archive had no
+            // colour of its own - on iOS 26 that came out as a bare icon beside a wide grey
+            // capsule with "Pin" written inside it. The Chats tab gives each action its symbol,
+            // its title and its colour and lets the system lay them out; this does the same.
+            let archiveAction = UIContextualAction(style: .normal, title: "Archive".localized()) { (_, _, completionHandler) in
                 self.archiveConversation(data)
                 completionHandler(true)
             }
-            let archiveIcon = UIImage(systemName: "archivebox.fill")!.createCustomIconWithText(text: "Archive".localized())
-            archiveAction.image = archiveIcon
+            archiveAction.backgroundColor = .mainColor
+            archiveAction.image = UIImage(systemName: "archivebox.fill")
 
             var textPinned = "Pin".localized()
             var pinnedDate = Date().currentTimeMillis()
@@ -2001,13 +2036,11 @@ extension ContactChatViewController {
                 completionHandler(true)
             }
             unpinAction.backgroundColor = .darkGray
-            let pinIcon = imagePinned.rotateImage(byDegrees: 45).createCustomIconWithText(text: textPinned, color: .white)
-            unpinAction.image = pinIcon
+            unpinAction.image = imagePinned
 
             let configuration = UISwipeActionsConfiguration(actions: [archiveAction, unpinAction])
             return configuration
         }
-        return nil
     }
     
     func groupSenderName(fpin: String, lPin: String) -> String {
@@ -2885,7 +2918,7 @@ extension ContactChatViewController: ChatTagSearchDelegate {
             var exblock = User.getDataCanNil(pin: chat.pin)?.ex_block
             exblock = exblock == nil ? "0" : exblock!.isEmpty ? "0" : exblock!
             if exblock != "0" {
-                self.view.makeToast(exblock == "1" ? "You blocked this user".localized() : "You have been blocked by this user".localized(), duration: 3)
+                self.view.presentToast(exblock == "1" ? "You blocked this user".localized() : "You have been blocked by this user".localized(), duration: 3)
                 return
             }
             chooser(chat.messageScope, chat.pin)

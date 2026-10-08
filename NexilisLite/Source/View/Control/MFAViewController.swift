@@ -248,16 +248,16 @@ class MFAViewController: UIViewController {
 
     @objc private func submitAction() {
         if !CheckConnection.isConnectedToNetwork() || API.nGetCLXConnState() == 0 {
-            self.view.makeToast("Check your connection".localized(), duration: 2.0, position: .center)
+            self.view.presentToast("Check your connection".localized(), duration: 2.0, position: .center)
             return
         }
         guard let password = passwordTextField.text, !password.trimmingCharacters(in: .whitespaces).isEmpty else {
-            self.view.makeToast("Password cannot be empty.".localized(), duration: 2.0, position: .center)
+            self.view.presentToast("Password cannot be empty.".localized(), duration: 2.0, position: .center)
             return
         }
 
         guard password.count >= 6 else {
-            self.view.makeToast("Password must be at least 6 characters.".localized(), duration: 2.0, position: .center)
+            self.view.presentToast("Password must be at least 6 characters.".localized(), duration: 2.0, position: .center)
             return
         }
 
@@ -366,7 +366,7 @@ class MFAViewController: UIViewController {
                                     DispatchQueue.main.async {
                                         Nexilis.hideLoader {
                                             self.navigationController?.dismiss(animated: true, completion: {
-                                                UIApplication.shared.visibleViewController?.view.makeToast("Successfully Authenticated".localized(), duration: 3)
+                                                UIApplication.shared.visibleViewController?.view.presentToast("Successfully Authenticated".localized(), duration: 3)
                                                 self.dismissKeyboard()
                                                 APIS.getMFACallback()?(0)
                                             })
@@ -451,7 +451,7 @@ class MFAViewController: UIViewController {
             DispatchQueue.main.async {
                 Nexilis.hideLoader {
                     self.navigationController?.dismiss(animated: true, completion: {
-                        UIApplication.shared.visibleViewController?.view.makeToast("Successfully Authenticated".localized(), duration: 3)
+                        UIApplication.shared.visibleViewController?.view.presentToast("Successfully Authenticated".localized(), duration: 3)
                         self.dismissKeyboard()
                         APIS.getMFACallback()?(0)
                     })

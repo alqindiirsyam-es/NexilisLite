@@ -647,7 +647,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         if viewController is ChatGPTBotView {
             if ((textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray && attachment_flag != "11") || textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ) {
                 dismissKeyboard()
-                viewController.view.makeToast("Write Messages".localized(), duration: 3)
+                viewController.view.presentToast("Write Messages".localized(), duration: 3)
                 if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized()) {
                     textFieldSend.text = ""
                 }
@@ -2124,7 +2124,7 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
             text = text + "\n\n\nchat " + "Powered by Nexilis".localized()
             DispatchQueue.main.async {
                 UIPasteboard.general.string = text
-                self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
+                self.view.presentToast("Text coppied to clipboard".localized(), duration: 3)
             }
             cancelAction()
         } else if deleteSession {
@@ -2208,7 +2208,7 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
                                         if FileManager.default.fileExists(atPath: imageURL.path) {
                                             let image    = UIImage(contentsOfFile: imageURL.path)
                                             UIPasteboard.general.image = image
-                                            self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
+                                            self.view.presentToast("Image coppied to clipboard".localized(), duration: 3)
                                         }
                                         else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                             do {
@@ -2219,7 +2219,7 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
                                                     }
                                                     let image = UIImage(data: imageData)
                                                     UIPasteboard.general.image = image
-                                                    self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
+                                                    self.view.presentToast("Image coppied to clipboard".localized(), duration: 3)
                                                 }
                                             } catch {
                                                 
@@ -2233,7 +2233,7 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
                         if (index == 0) {
                             DispatchQueue.main.async {
                                 UIPasteboard.general.string = ChatMessageText.spoken(of: dataMessages[indexPath.row])
-                                self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
+                                self.view.presentToast("Text coppied to clipboard".localized(), duration: 3)
                             }
                         } else {
                             DispatchQueue.main.async {
@@ -2246,7 +2246,7 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
                                         if FileManager.default.fileExists(atPath: imageURL.path) {
                                             let image    = UIImage(contentsOfFile: imageURL.path)
                                             UIPasteboard.general.image = image
-                                            self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
+                                            self.view.presentToast("Image coppied to clipboard".localized(), duration: 3)
                                         }
                                         else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                             do {
@@ -2257,7 +2257,7 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
                                                     }
                                                     let image = UIImage(data: imageData)
                                                     UIPasteboard.general.image = image
-                                                    self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
+                                                    self.view.presentToast("Image coppied to clipboard".localized(), duration: 3)
                                                 }
                                             } catch {
                                                 
@@ -2656,7 +2656,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             return
         }
         DispatchQueue.global().async {
@@ -2680,7 +2680,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
                         if row != nil && section != nil {
                             self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                         }
-                        self.view.makeToast("Confirmation Success.".localized(), duration: 3)
+                        self.view.presentToast("Confirmation Success.".localized(), duration: 3)
                     }
                 }
             }

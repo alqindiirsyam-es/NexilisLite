@@ -205,7 +205,7 @@ public class ChangeDeviceViewController: UIViewController {
     func sendOTP(to phoneNumber: String) {
         PhoneAuthProvider.provider().verifyPhoneNumber(phoneNumber, uiDelegate: nil) { verificationID, error in
             if let error = error {
-                UIApplication.shared.visibleViewController?.view.makeToast("Error sending OTP: \(error)".localized(), duration: 3, position: .center)
+                UIApplication.shared.visibleViewController?.view.presentToast("Error sending OTP: \(error)".localized(), duration: 3, position: .center)
                 return
             }
 
@@ -318,7 +318,7 @@ public class ChangeDeviceViewController: UIViewController {
                 SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
                 KeyManagerNexilis.deleteKey()
                 KeyManagerNexilis.deleteMarker()
-                UIApplication.shared.visibleViewController?.view.makeToast("Biometric or passcode authentication required".localized(), duration: 3, position: .center)
+                UIApplication.shared.visibleViewController?.view.presentToast("Biometric or passcode authentication required".localized(), duration: 3, position: .center)
                 return
             }
             Nexilis.showLoader()
@@ -388,13 +388,13 @@ public class ChangeDeviceViewController: UIViewController {
                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                 imageView.tintColor = .white
                 let banner = FloatingNotificationBanner(title: title, subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                banner.show()
+                banner.showOnScreen()
             })
         } else {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: title, subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
         }
     }
     
@@ -516,7 +516,7 @@ public class ChangeDeviceViewController: UIViewController {
             SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
             KeyManagerNexilis.deleteKey()
             KeyManagerNexilis.deleteMarker()
-            UIApplication.shared.visibleViewController?.view.makeToast("Biometric or passcode authentication required".localized(), duration: 3, position: .center)
+            UIApplication.shared.visibleViewController?.view.presentToast("Biometric or passcode authentication required".localized(), duration: 3, position: .center)
             return
         }
         Nexilis.showLoader()
@@ -601,7 +601,7 @@ public class ChangeDeviceViewController: UIViewController {
                 let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
                 imageView.tintColor = .white
                 let banner = FloatingNotificationBanner(title: "Multiple Login Detected...".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
-                banner.show()
+                banner.showOnScreen()
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
                 Nexilis.hideLoader(completion: {
@@ -651,7 +651,7 @@ public class ChangeDeviceViewController: UIViewController {
                         let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Successfully Sign-In".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                        banner.show()
+                        banner.showOnScreen()
                         if Nexilis.showFB {
                             Nexilis.floatingButton?.removeFromSuperview()
                             FloatingButton.datePull = nil

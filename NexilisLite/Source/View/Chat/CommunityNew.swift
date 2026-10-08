@@ -200,7 +200,7 @@ public class CommunityNew: UIViewController, UITextFieldDelegate  {
                                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                     imageView.tintColor = .white
                                     let banner = FloatingNotificationBanner(title: "Failed to create community, please try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                    banner.show()
+                                    banner.showOnScreen()
                                 })
                             }
                             return
@@ -248,7 +248,7 @@ public class CommunityNew: UIViewController, UITextFieldDelegate  {
                                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Failed to create community, please try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                banner.show()
+                                banner.showOnScreen()
                             })
                         }
                     }
@@ -258,7 +258,7 @@ public class CommunityNew: UIViewController, UITextFieldDelegate  {
                             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                             imageView.tintColor = .white
                             let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                            banner.show()
+                            banner.showOnScreen()
                         })
                     }
                 }

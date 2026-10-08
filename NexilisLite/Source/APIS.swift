@@ -272,6 +272,8 @@ public class APIS: NSObject {
     public static func connect(appName: String, apiKey: String, userName: String = "", delegate: ConnectDelegate,
                                showButton: Bool = true, fromMAB: Bool = false,
                                zta: Bool = true, securityShield: Bool = true) {
+        DispatchQueue.main.async { ToastPresenter.startWatchingKeyboard() }
+        ConnectionWatch.shared.start()
         APIS.appNm = appName.trimmingCharacters(in: .whitespacesAndNewlines)
         // The pre-asset sign-in runs inside the chain, before Nexilis.connect records the key.
         LiteBootstrapAuth.connectAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -641,7 +643,7 @@ public class APIS: NSObject {
                 let message = Nexilis.checkingAccessAlert(key: "call_center").component(1, separatedBy: "|")
                 APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
             } else {
-                UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
             }
             return
         }
@@ -661,7 +663,7 @@ public class APIS: NSObject {
         } else {
             if media != nil || (media == nil && category != nil) {
                 if media == nil || media! < 0 || media! > 2 {
-                    UIApplication.shared.visibleViewController?.view.makeToast("108:Invalid Call Center media parameter (0:Chat, 1:Audio Call, 2:Video Call)".localized(), duration: 3)
+                    UIApplication.shared.visibleViewController?.view.presentToast("108:Invalid Call Center media parameter (0:Chat, 1:Audio Call, 2:Video Call)".localized(), duration: 3)
                     return
                 }
             }
@@ -669,12 +671,12 @@ public class APIS: NSObject {
                 if category != 0 {
                     let service = CategoryCC.getDataFromServiceId(service_id: "\(category!)")
                     if service == nil {
-                        UIApplication.shared.visibleViewController?.view.makeToast("109:Invalid Call Center category parameter".localized(), duration: 3)
+                        UIApplication.shared.visibleViewController?.view.presentToast("109:Invalid Call Center category parameter".localized(), duration: 3)
                         return
                     }
                     let serviceChilds = CategoryCC.getDatafromParent(parent: service!.service_id)
                     if serviceChilds.count > 0 {
-                        UIApplication.shared.visibleViewController?.view.makeToast("109:Invalid Call Center category parameter".localized(), duration: 3)
+                        UIApplication.shared.visibleViewController?.view.presentToast("109:Invalid Call Center category parameter".localized(), duration: 3)
                         return
                     }
                 }
@@ -722,7 +724,7 @@ public class APIS: NSObject {
                 let message = Nexilis.checkingAccessAlert(key: "call_center").component(1, separatedBy: "|")
                 APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
             } else {
-                UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
             }
             return
         }
@@ -762,7 +764,7 @@ public class APIS: NSObject {
             return
         }
         if !Nexilis.checkingAccess(key: "notification_center") {
-            UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+            UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
             return
         }
         let controller = HistoryBroadcastViewController()
@@ -813,12 +815,12 @@ public class APIS: NSObject {
     
     public static func startChat(name: String) {
         if name.isEmpty {
-            UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.presentToast("92:Username is empty".localized(), duration: 2)
             return
         }
         let user = User.getDataFromNameCanNil(name: name)
         if user == nil {
-            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
             return
         }
         let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
@@ -877,7 +879,7 @@ public class APIS: NSObject {
                 let message = Nexilis.checkingAccessAlert(key: "live_streaming").component(1, separatedBy: "|")
                 APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
             } else {
-                UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
             }
             return
         }
@@ -905,7 +907,7 @@ public class APIS: NSObject {
                 let message = Nexilis.checkingAccessAlert(key: "vconf_room").component(1, separatedBy: "|")
                 APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
             } else {
-                UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
             }
             return
         }
@@ -928,7 +930,7 @@ public class APIS: NSObject {
             return
         }
         if !Nexilis.checkingAccess(key: "audio_call") {
-            UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+            UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
             return
         }
         let callContact = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "contactSID") as! ContactCallViewController
@@ -944,23 +946,23 @@ public class APIS: NSObject {
     
     public static func startAudioCall(name: String) {
         if name.isEmpty {
-            UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("92:Username is empty".localized(), duration: 3)
             return
         }
         if !Nexilis.checkingAccess(key: "audio_call") {
-            UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+            UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
             return
         }
         let user = User.getDataFromNameCanNil(name: name)
         if user == nil {
-            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
             return
         }
         if !CheckConnection.isConnectedToNetwork() {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             return
         }
         let controller = QmeraAudioViewController()
@@ -984,7 +986,7 @@ public class APIS: NSObject {
             return
         }
         if !Nexilis.checkingAccess(key: "video_call") {
-            UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+            UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
             return
         }
         let callContact = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "contactSID") as! ContactCallViewController
@@ -1000,23 +1002,23 @@ public class APIS: NSObject {
     
     public static func startVideoCall(name: String) {
         if name.isEmpty {
-            UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("92:Username is empty".localized(), duration: 3)
             return
         }
         if !Nexilis.checkingAccess(key: "video_call") {
-            UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+            UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
             return
         }
         let user = User.getDataFromNameCanNil(name: name)
         if user == nil {
-            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
             return
         }
         if !CheckConnection.isConnectedToNetwork() {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             return
         }
         let videoVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
@@ -1045,7 +1047,7 @@ public class APIS: NSObject {
             return
         }
         if !Nexilis.checkingAccess(key: "broadcast_message") {
-            UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+            UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
             return
         }
         let controller = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "broadcastNav")
@@ -1226,7 +1228,7 @@ public class APIS: NSObject {
                     DispatchQueue.main.async {
                         Nexilis.hideLoader {
                             let errMessage = "Invalid user / Username and password does not match".localized()
-                            UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
+                            UIApplication.shared.visibleViewController?.view.presentToast(errMessage, duration: 3)
                             APIS.getMFACallback()?(2)
                         }
                     }
@@ -1234,7 +1236,7 @@ public class APIS: NSObject {
                     DispatchQueue.main.async {
                         Nexilis.hideLoader {
                             let errMessage = "Failed, unknown user".localized()
-                            UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
+                            UIApplication.shared.visibleViewController?.view.presentToast(errMessage, duration: 3)
                             APIS.getMFACallback()?(2)
                         }
                     }
@@ -1242,7 +1244,7 @@ public class APIS: NSObject {
                     DispatchQueue.main.async {
                         Nexilis.hideLoader {
                             let errMessage = "Failed, blocked user".localized()
-                            UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
+                            UIApplication.shared.visibleViewController?.view.presentToast(errMessage, duration: 3)
                             APIS.getMFACallback()?(2)
                         }
                     }
@@ -1250,7 +1252,7 @@ public class APIS: NSObject {
                     DispatchQueue.main.async {
                         Nexilis.hideLoader {
                             let errMessage = "Failed, This user is not registered on this device".localized()
-                            UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
+                            UIApplication.shared.visibleViewController?.view.presentToast(errMessage, duration: 3)
                             APIS.getMFACallback()?(2)
                         }
                     }
@@ -1258,7 +1260,7 @@ public class APIS: NSObject {
                     DispatchQueue.main.async {
                         Nexilis.hideLoader {
                             let errMessage = "Failed".localized()
-                            UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
+                            UIApplication.shared.visibleViewController?.view.presentToast(errMessage, duration: 3)
                             APIS.getMFACallback()?(2)
                         }
                     }
@@ -1279,7 +1281,7 @@ public class APIS: NSObject {
                             Utils.setLoginMultipleFPin(value: f_pin)
                             DispatchQueue.main.async {
                                 let errMessage = "Multiple Login Detected...".localized()
-                                UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
+                                UIApplication.shared.visibleViewController?.view.presentToast(errMessage, duration: 3)
                                 if Nexilis.showFB {
                                     Nexilis.floatingButton?.removeFromSuperview()
                                     FloatingButton.datePull = nil
@@ -1331,7 +1333,7 @@ public class APIS: NSObject {
                 DispatchQueue.main.async {
                     Nexilis.hideLoader {
                         let errMessage = "Unable to access servers. Check your internet connection and try again later".localized()
-                        UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
+                        UIApplication.shared.visibleViewController?.view.presentToast(errMessage, duration: 3)
                         APIS.getMFACallback()?(13)
                     }
                 }
@@ -1455,7 +1457,7 @@ public class APIS: NSObject {
 
                                         if result {
                                             DispatchQueue.main.async {
-                                                UIApplication.shared.visibleViewController?.view.makeToast("Successfully Authenticated".localized(), duration: 3)
+                                                UIApplication.shared.visibleViewController?.view.presentToast("Successfully Authenticated".localized(), duration: 3)
                                             }
                                             APIS.getMFACallback()?(0)
                                         } else {
@@ -1485,7 +1487,7 @@ public class APIS: NSObject {
                                         }
                                     } else {
                                         DispatchQueue.main.async {
-                                            UIApplication.shared.visibleViewController?.view.makeToast("Successfully Authenticated".localized(), duration: 3)
+                                            UIApplication.shared.visibleViewController?.view.presentToast("Successfully Authenticated".localized(), duration: 3)
                                         }
                                         APIS.getMFACallback()?(0)
                                     }
@@ -1789,19 +1791,19 @@ public class APIS: NSObject {
     
     public static func startWhiteboard(name: String) {
         if name.isEmpty {
-            UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("92:Username is empty".localized(), duration: 3)
             return
         }
         let user = User.getDataFromNameCanNil(name: name)
         if user == nil {
-            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
             return
         }
         if !CheckConnection.isConnectedToNetwork() {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             return
         }
         let controller = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "wbVC") as! WhiteboardViewController
@@ -1834,19 +1836,19 @@ public class APIS: NSObject {
     
     public static func startScreenSharing(name: String) {
         if name.isEmpty {
-            UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("92:Username is empty".localized(), duration: 3)
             return
         }
         let user = User.getDataFromNameCanNil(name: name)
         if user == nil {
-            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
             return
         }
         if !CheckConnection.isConnectedToNetwork() {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             return
         }
         let controller = ScreenSharingViewController()
@@ -1883,7 +1885,7 @@ public class APIS: NSObject {
     
     public static func signInAdmin(password: String) {
         if password.isEmpty {
-            UIApplication.shared.visibleViewController?.view.makeToast("113:Password is empty".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("113:Password is empty".localized(), duration: 3)
             return
         }
         let isChangeProfile = Utils.getSetProfile()
@@ -1893,14 +1895,14 @@ public class APIS: NSObject {
         }
         let isAdmin = User.isAdmin()
         if isAdmin {
-            UIApplication.shared.visibleViewController?.view.makeToast("112:You already login or registered as Admin".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("112:You already login or registered as Admin".localized(), duration: 3)
             return
         }
         if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             return
         }
         Nexilis.showLoader()
@@ -1911,7 +1913,7 @@ public class APIS: NSObject {
                         let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Successfully Sign-In Admin".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                        banner.show()
+                        banner.showOnScreen()
                     }
                 }
             } else {
@@ -1937,12 +1939,12 @@ public class APIS: NSObject {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Username or password does not match".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                        banner.show()
+                        banner.showOnScreen()
                     } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "20" {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Invalid password".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                        banner.show()
+                        banner.showOnScreen()
                     }
                 }
             } else {
@@ -1950,7 +1952,7 @@ public class APIS: NSObject {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Unable to access servers".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                    banner.show()
+                    banner.showOnScreen()
                 }
             }
             completion(result)
@@ -1965,7 +1967,7 @@ public class APIS: NSObject {
         }
         let isAdmin = User.isAdmin()
         if !isAdmin {
-            UIApplication.shared.visibleViewController?.view.makeToast("111:You must Sign In as Admin to use this feature".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("111:You must Sign In as Admin to use this feature".localized(), duration: 3)
             return
         }
         let controller = SetInternalCSAccount()
@@ -2082,15 +2084,15 @@ public class APIS: NSObject {
         }
         let finalUname = uname.replacingOccurrences(of: "[\\n\\r\\t~%()\"]", with: "", options: .regularExpression)
         if finalUname == User.getData(pin: User.getMyPin())?.fullName {
-            UIApplication.shared.visibleViewController?.view.makeToast("102:Duplicate username".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("102:Duplicate username".localized(), duration: 3)
             return
         }
         if finalUname.count == 0 {
-            UIApplication.shared.visibleViewController?.view.makeToast("103:Username is empty".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("103:Username is empty".localized(), duration: 3)
             return
         }
         if finalUname.count < 3 {
-            UIApplication.shared.visibleViewController?.view.makeToast("104:Username length is too short".localized(), duration: 3)
+            UIApplication.shared.visibleViewController?.view.presentToast("104:Username length is too short".localized(), duration: 3)
             return
         }
         let a = finalUname.split(separator: " ", maxSplits: 1)
@@ -2113,7 +2115,7 @@ public class APIS: NSObject {
                             let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                             imageView.tintColor = .white
                             let banner = FloatingNotificationBanner(title: "Successfully changed name".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                            banner.show()
+                            banner.showOnScreen()
                         }
                     }
                 } else if resp.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "1a" {
@@ -2121,7 +2123,7 @@ public class APIS: NSObject {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Username has been registered, please use another name".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                        banner.show()
+                        banner.showOnScreen()
                     }
                 }
             }
@@ -5482,7 +5484,7 @@ public final class VersionDiagnostics {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
         count += 1
         if count == 3 {
-            host.view.makeToast("\(API.sGetVersion() ?? "") \(API.nGetCLXConnState() == 1)", duration: 2)
+            host.view.presentToast("\(API.sGetVersion() ?? "") \(API.nGetCLXConnState() == 1)", duration: 2)
         } else if count == 5 {
             askForCommand(from: host)
         }
@@ -5498,7 +5500,7 @@ public final class VersionDiagnostics {
         alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak alert, weak host] _ in
             guard let host, let value = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespaces),
                   let answer = VersionDiagnostics.answer(to: value) else { return }
-            host.view.makeToast(answer, duration: 3.5)
+            host.view.presentToast(answer, duration: 3.5)
         })
         host.present(alert, animated: true)
     }
@@ -5524,5 +5526,199 @@ public final class VersionDiagnostics {
         default:
             return nil
         }
+    }
+}
+
+/// Where on the screen a toast goes.
+public enum ToastPlacement {
+    case bottom, center, top
+}
+
+extension UIView {
+
+    /// Shows `message` as a toast the reader can actually see.
+    ///
+    /// Fix: toasts were put on whatever view asked for them, and placed by that view's own bounds.
+    /// Toast measures "bottom" as the bottom of the view's frame, not the bottom of what is on
+    /// screen. On a list taller than the screen (a table view, a screen pushed under the tab bar,
+    /// a sheet), on a scrolled list, or under the keyboard, that put the toast partly or wholly off
+    /// screen. Every toast now goes on the window, inside the part of it that is in front of the
+    /// reader: below the status bar, and above the home indicator, a showing tab bar and the
+    /// keyboard.
+    public func presentToast(_ message: String?, duration: TimeInterval = 3.0, position: ToastPlacement = .bottom) {
+        guard let message, !message.isEmpty else {
+            return
+        }
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.presentToast(message, duration: duration, position: position)
+            }
+            return
+        }
+        ToastPresenter.show(message, duration: duration, position: position, from: self)
+    }
+}
+
+/// A toast for code with no view of its own to show it from - a reply arriving off screen, a
+/// static helper. It goes on the screen in front of the reader, the same way `presentToast` on a
+/// view does.
+public func presentToast(_ message: String?, duration: TimeInterval = 3.0, position: ToastPlacement = .bottom) {
+    guard let message, !message.isEmpty else {
+        return
+    }
+    guard Thread.isMainThread else {
+        DispatchQueue.main.async {
+            presentToast(message, duration: duration, position: position)
+        }
+        return
+    }
+    ToastPresenter.show(message, duration: duration, position: position, from: nil)
+}
+
+enum ToastPresenter {
+
+    /// The keyboard's height on screen, kept from its own notifications.
+    private static var keyboardHeight: CGFloat = 0
+    private static var watching = false
+
+    /// Starts following the keyboard. Called when Lite starts, so a keyboard already up when the
+    /// first toast is shown has been seen.
+    static func startWatchingKeyboard() {
+        guard !watching else {
+            return
+        }
+        watching = true
+        let center = NotificationCenter.default
+        center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { note in
+            guard let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else {
+                return
+            }
+            let screen = UIScreen.main.bounds
+            keyboardHeight = end.minY >= screen.maxY ? 0 : max(0, screen.maxY - end.minY)
+        }
+        center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
+            keyboardHeight = 0
+        }
+    }
+
+    static func show(_ message: String, duration: TimeInterval, position: ToastPlacement, from asking: UIView?) {
+        startWatchingKeyboard()
+        // Nothing asking: the screen in front of the reader is the one it is shown over.
+        guard let source = asking ?? UIApplication.shared.visibleViewController?.view ?? hostWindow(),
+              let window = source.window ?? hostWindow(),
+              let toast = try? window.toastViewForMessage(message, title: nil, image: nil, style: ToastManager.shared.style) else {
+            return
+        }
+        let area = visibleArea(in: window, from: source)
+        let gap = ToastManager.shared.style.verticalPadding
+        let half = toast.bounds.height / 2
+        let y: CGFloat
+        switch position {
+        case .top:
+            y = area.minY + gap + half
+        case .center:
+            y = area.midY
+        case .bottom:
+            y = area.maxY - gap - half
+        }
+        window.showToast(toast, duration: duration, point: CGPoint(x: window.bounds.midX, y: max(area.minY + half, y)))
+    }
+
+    /// The part of the window in front of the reader.
+    private static func visibleArea(in window: UIWindow, from source: UIView) -> CGRect {
+        let top = window.safeAreaInsets.top
+        var bottom = window.bounds.height - max(window.safeAreaInsets.bottom, keyboardHeight)
+        // A tab bar that is on screen is not somewhere to put a toast either.
+        var responder: UIResponder? = source
+        while let next = responder, !(next is UIViewController) {
+            responder = next.next
+        }
+        if let tabBar = (responder as? UIViewController)?.tabBarController?.tabBar,
+           tabBar.window === window, !tabBar.isHidden, tabBar.alpha > 0.01 {
+            let frame = tabBar.convert(tabBar.bounds, to: window)
+            if frame.minY < window.bounds.height, frame.maxY > top {
+                bottom = min(bottom, frame.minY)
+            }
+        }
+        return CGRect(x: 0, y: top, width: window.bounds.width, height: max(0, bottom - top))
+    }
+
+    /// The app's own window when the asking view has none - a screen already taken down, or a view
+    /// not on screen yet.
+    private static func hostWindow() -> UIWindow? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        let windows = scene?.windows ?? []
+        return windows.first { $0.isKeyWindow && $0.windowLevel == .normal }
+            ?? windows.first { $0.windowLevel == .normal && !$0.isHidden }
+    }
+}
+
+/// Where a top banner goes so that what it says is below the status bar, the notch and the
+/// Dynamic Island.
+public struct BannerPlacement {
+    /// The banner's distance from the top of the window - its `edgeInsets.top`.
+    public let top: CGFloat
+    /// The banner's whole height - its `bannerHeight`.
+    public let height: CGFloat
+}
+
+extension APIS {
+
+    /// Where to show a top banner whose content is `contentHeight` tall.
+    ///
+    /// Fix: on an iPhone 17 Pro the banners' words sat behind the Dynamic Island. NotificationBanner
+    /// keeps a strip clear above its content - 44pt for a Dynamic Island, 40 for a notch, 10
+    /// otherwise - and decides which by asking `UIApplication.keyWindow`. With scenes that answer
+    /// can be nil, or a window of ours that is not the app's, and then a Dynamic Island iPhone is
+    /// laid out as one with neither: a 64pt banner with its title at the very top of the screen.
+    /// The strip the library will keep is worked out the way it works it out, and the banner is
+    /// moved down by whatever the screen's real safe area needs on top of that - so the content
+    /// starts just under the status bar whichever way the library decided.
+    public static func bannerPlacement(contentHeight: CGFloat = 56) -> BannerPlacement {
+        // What the library reads, read the same way.
+        let libraryWindow = UIApplication.shared.value(forKey: "keyWindow") as? UIWindow
+        let libraryInsets = libraryWindow?.safeAreaInsets ?? .zero
+        let portrait = (appWindow()?.windowScene?.interfaceOrientation ?? .portrait).isPortrait
+        let strip: CGFloat = portrait && libraryInsets.top > 50 ? 44 : (portrait && libraryInsets.bottom > 0 ? 40 : 10)
+        // The part of the banner above its content: the strip, less the 10pt it is lifted by.
+        let aboveContent = strip - 10
+        // What the screen really keeps clear at the top.
+        let window = appWindow()
+        var safeTop = window?.safeAreaInsets.top ?? 0
+        if safeTop <= 0 {
+            safeTop = window?.windowScene?.statusBarManager?.statusBarFrame.height ?? 20
+        }
+        return BannerPlacement(top: safeTop + 6 - aboveContent, height: aboveContent + contentHeight)
+    }
+
+    /// The app's own window - the one the library puts banners on.
+    static func appWindow() -> UIWindow? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        let windows = scene?.windows ?? []
+        return windows.first { $0.windowLevel == .normal && !$0.isHidden } ?? windows.first
+    }
+}
+
+extension FloatingNotificationBanner {
+
+    /// Shows the banner at the top of the screen with what it says clear of the status bar, the
+    /// notch and the Dynamic Island - see APIS.bannerPlacement. A card a little in from the edges,
+    /// the way the chat notifications are shown.
+    func showOnScreen() {
+        let place = APIS.bannerPlacement()
+        bannerHeight = place.height
+        show(queuePosition: .back,
+             bannerPosition: .top,
+             on: nil,
+             edgeInsets: UIEdgeInsets(top: place.top, left: 8, bottom: 0, right: 8),
+             cornerRadius: 12,
+             shadowColor: .black,
+             shadowOpacity: 0.16,
+             shadowBlurRadius: 12,
+             shadowCornerRadius: 12,
+             shadowOffset: UIOffset(horizontal: 0, vertical: 4),
+             shadowEdgeInsets: nil)
     }
 }

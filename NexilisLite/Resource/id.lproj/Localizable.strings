@@ -534,3 +534,8 @@
 "Requester" = "Pemohon";
 "End session as" = "Akhiri sesi sebagai";
 "Choose the status of this Call Center session" = "Pilih status sesi Call Center ini";
+"Connecting..." = "Menghubungkan...";
+"You cannot open a conversation when you're offline." = "Anda tidak dapat membuka percakapan saat offline.";
+"You cannot open a chat when you're offline. The conversation will automatically close in 5 seconds." = "Anda tidak dapat membuka chat saat offline. Percakapan akan tertutup otomatis dalam 5 detik.";
+"Invalid App State!" = "Status Aplikasi Tidak Valid!";
+"Please re-open app again, the application will automatically stop. To try again, please use stable connection!" = "Silakan buka ulang aplikasi, aplikasi akan berhenti otomatis. Untuk mencoba lagi, gunakan koneksi yang stabil!";

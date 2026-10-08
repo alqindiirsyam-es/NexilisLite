@@ -214,14 +214,27 @@ public class Database {
         DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: workItem)
     }
     
+    static let fileProtection = FileProtectionType.completeUntilFirstUserAuthentication
+
+    /// The WAL and shared-memory files get the database file's protection too, once SQLite created them.
+    static func protectJournalFiles(of databasePath: String) {
+        for suffix in ["-wal", "-shm"] where FileManager.default.fileExists(atPath: databasePath + suffix) {
+            try? FileManager.default.setAttributes([.protectionKey: fileProtection], ofItemAtPath: databasePath + suffix)
+        }
+    }
+
     func setupDatabaseQueue(withPath databasePath: String) -> FMDatabaseQueue? {
         if !FileManager.default.fileExists(atPath: databasePath) {
             FileManager.default.createFile(atPath: databasePath, contents: nil, attributes: nil)
         }
         
+        // Data protection: readable from the first unlock after boot until the next restart, which is
+        // what background work (pushes, calls) needs - and nothing is lost before that first unlock,
+        // because the SQLCipher key comes from a Keychain item that is not available then either. This
+        // used to be `.none`: readable even on a phone that has not been unlocked since boot, and weaker
+        // than the protection iOS gives the -wal/-shm files beside it by default.
         do {
-            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.none], ofItemAtPath: databasePath)
-//            print("File protection attribute set to 'complete'.")
+            try FileManager.default.setAttributes([.protectionKey: Database.fileProtection], ofItemAtPath: databasePath)
         } catch {
 //            print("Error setting file protection attribute: \(error)")
             return nil
@@ -303,6 +316,7 @@ public class Database {
             }
             fmdb.maxBusyRetryTimeInterval = 3.0
         })
+        Database.protectJournalFiles(of: databasePath)
         // A connection that never got its key would answer every query with "not a database", and
         // worse, would look open to everything that only asks whether it is nil. It is let go
         // without ever being installed, so the next caller tries again once the key is in hand.
@@ -1014,6 +1028,11 @@ public class Database {
     
     public func getRecords(fmdb: FMDatabase, table: String, fields: [String], _where : String, group_by : String, order_by: String) -> FMResultSet? {
         var _result: FMResultSet? = nil
+        // Offline in a mode whose keys are not kept on the device, nothing is read - Android's
+        // CoreDataSqliteDB.fetch answers null the same way. See OfflinePolicy.
+        if OfflinePolicy.isBlocking {
+            return nil
+        }
         do {
             var _fields = ""
             var delim = ""
@@ -1040,6 +1059,11 @@ public class Database {
     
     public func getRecords(fmdb: FMDatabase, query: String) -> FMResultSet? {
         var _result: FMResultSet? = nil
+        // Offline in a mode whose keys are not kept on the device, nothing is read - Android's
+        // CoreDataSqliteDB.fetch answers null the same way. See OfflinePolicy.
+        if OfflinePolicy.isBlocking {
+            return nil
+        }
         do {
             _result = try fmdb.executeQuery(query, values: nil)
         } catch {

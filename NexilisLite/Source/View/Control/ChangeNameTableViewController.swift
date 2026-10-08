@@ -66,7 +66,7 @@ class ChangeNameTableViewController: UITableViewController {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Username has been registered, please use another name".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                        banner.show()
+                        banner.showOnScreen()
                     }
                 }
             }

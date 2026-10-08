@@ -346,7 +346,7 @@ class SetOfficerBNI: UIViewController {
                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                 imageView.tintColor = .white
                 let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                banner.show()
+                banner.showOnScreen()
                 return
             }
             let message = CoreMessage_TMessageBank.getManagementContactCenterBNI(l_pin:  self.f_pin, type: "1", category_id: "\(self.chosenData[self.chosenData.count - 1].service_id)", area_id: self.chosenSecondLayer == "Yes".localized() ? "1" : "0", is_second_layer: self.chosenWorkingArea != nil && self.chosenSecondLayer == "Yes".localized() ? self.chosenWorkingArea!.area_id : "")
@@ -357,7 +357,7 @@ class SetOfficerBNI: UIViewController {
                         let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Successfully changed".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                        banner.show()
+                        banner.showOnScreen()
                         self.dismiss(animated: true)
                     }
                 }
@@ -366,12 +366,12 @@ class SetOfficerBNI: UIViewController {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Username or password does not match".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                        banner.show()
+                        banner.showOnScreen()
                     } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "20" {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Invalid password".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                        banner.show()
+                        banner.showOnScreen()
                     }
                 }
             } else {
@@ -379,7 +379,7 @@ class SetOfficerBNI: UIViewController {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Unable to access servers".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                 }
             }
         }))

@@ -46,10 +46,10 @@ let package = Package(
         // Sentinel/ZTA hardening. NexilisLite's public API names its types
         // (APIS.configureSentinel takes a NexilisZTAConfiguration), so it is a
         // declared dependency rather than something a consumer can do without.
-        .package(url: "https://github.com/alqindiirsyam-es/NexilisZTA.git", from: "6.0.8"),
+        .package(url: "https://github.com/alqindiirsyam-es/NexilisZTA.git", from: "6.0.9"),
         // The SecurityShield policy checks, in a package of their own. APIS.connect runs them
         // between the ZTA authorization and the messaging session.
-        .package(url: "https://github.com/alqindiirsyam-es/NexilisSecurityShield.git", from: "6.0.8")
+        .package(url: "https://github.com/alqindiirsyam-es/NexilisSecurityShield.git", from: "6.0.9")
     ],
     targets: [
         // MARK: - Vendored dependencies (no upstream SPM support)

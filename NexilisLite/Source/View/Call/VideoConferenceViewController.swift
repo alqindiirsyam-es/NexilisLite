@@ -1040,7 +1040,7 @@ class VideoConferenceViewController: UIViewController {
                     _ = Nexilis.write(message: CoreMessage_TMessageBank.inviteVCallConference(f_pin: data["f_pin"]!!, blog_id: self.roomId))
                 }
                 DispatchQueue.main.async {
-                    self.view.makeToast("Invitation has been sent to \(data["name"]!!)".localized(), duration: 3)
+                    self.view.presentToast("Invitation has been sent to \(data["name"]!!)".localized(), duration: 3)
                 }
             }
             present(CustomNavigationController(rootViewController: contactViewController), animated: true, completion: nil)

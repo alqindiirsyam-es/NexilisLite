@@ -482,7 +482,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                         imageView.tintColor = .white
                         self.publicBanner.dismiss()
                         self.publicBanner = FloatingNotificationBanner(title: "Successfully changed status".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                        self.publicBanner.show()
+                        self.publicBanner.showOnScreen()
                     }
                 }
             } else {
@@ -491,7 +491,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Unable to access servers".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                        banner.show()
+                        banner.showOnScreen()
                     }
                 }
             }
@@ -507,7 +507,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                 imageView.tintColor = .white
                 publicBanner.dismiss()
                 publicBanner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                publicBanner.show()
+                publicBanner.showOnScreen()
                 self.switchPrivateAccount.setOn(!value, animated: true)
                 return
             }
@@ -531,7 +531,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                             imageView.tintColor = .white
                             publicBanner.dismiss()
                             publicBanner = FloatingNotificationBanner(title: "Successfully changed".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                            publicBanner.show()
+                            publicBanner.showOnScreen()
                         }
                     } else {
                         DispatchQueue.main.async { [self] in
@@ -539,7 +539,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                             imageView.tintColor = .white
                             publicBanner.dismiss()
                             publicBanner = FloatingNotificationBanner(title: "Unable to access servers".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                            publicBanner.show()
+                            publicBanner.showOnScreen()
                             self.switchPrivateAccount.setOn(!value, animated: true)
                         }
                     }
@@ -557,7 +557,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                 imageView.tintColor = .white
                 publicBanner.dismiss()
                 publicBanner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                publicBanner.show()
+                publicBanner.showOnScreen()
                 self.switchPrivateAccount.setOn(!value, animated: true)
                 return
             }
@@ -581,7 +581,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                             imageView.tintColor = .white
                             publicBanner.dismiss()
                             publicBanner = FloatingNotificationBanner(title: "Successfully changed".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                            publicBanner.show()
+                            publicBanner.showOnScreen()
                         }
                     } else {
                         DispatchQueue.main.async { [self] in
@@ -589,7 +589,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                             imageView.tintColor = .white
                             publicBanner.dismiss()
                             publicBanner = FloatingNotificationBanner(title: "Unable to access servers".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                            publicBanner.show()
+                            publicBanner.showOnScreen()
                             self.switchPrivateAccount.setOn(!value, animated: true)
                         }
                     }
@@ -625,7 +625,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
             return
         }
         if !Nexilis.checkingAccess(key: "audio_call") {
-            self.view.makeToast("Feature disabled..".localized(), duration: 3)
+            self.view.presentToast("Feature disabled..".localized(), duration: 3)
             return
         }
         let myData = User.getData(pin: self.data)
@@ -638,7 +638,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
             imageView.tintColor = .white
             publicBanner.dismiss()
             publicBanner = FloatingNotificationBanner(title: title, subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            publicBanner.show()
+            publicBanner.showOnScreen()
             return
         }
         if !CheckConnection.isConnectedToNetwork() {
@@ -646,7 +646,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
             imageView.tintColor = .white
             publicBanner.dismiss()
             publicBanner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            publicBanner.show()
+            publicBanner.showOnScreen()
             return
         }
         let controller = QmeraAudioViewController()
@@ -661,7 +661,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
             return
         }
         if !Nexilis.checkingAccess(key: "video_call") {
-            self.view.makeToast("Feature disabled..".localized(), duration: 3)
+            self.view.presentToast("Feature disabled..".localized(), duration: 3)
             return
         }
         let myData = User.getData(pin: self.data)
@@ -674,7 +674,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
             imageView.tintColor = .white
             publicBanner.dismiss()
             publicBanner = FloatingNotificationBanner(title: title, subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            publicBanner.show()
+            publicBanner.showOnScreen()
             return
         }
         if !CheckConnection.isConnectedToNetwork() {
@@ -682,7 +682,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
             imageView.tintColor = .white
             publicBanner.dismiss()
             publicBanner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            publicBanner.show()
+            publicBanner.showOnScreen()
             return
         }
         if let user = user {
@@ -778,7 +778,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                                 imageView.tintColor = .white
                                 publicBanner.dismiss()
                                 publicBanner = FloatingNotificationBanner(title: "Successfully removed profile picture".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                                publicBanner.show()
+                                publicBanner.showOnScreen()
                                 self.dismissImage?(UIImage(systemName: "person.circle.fill")!, "")
                             }
                         }
@@ -851,7 +851,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                         imageView.tintColor = .white
                         publicBanner.dismiss()
                         publicBanner = FloatingNotificationBanner(title: Nexilis.checkingAccess(key: "friend_request_approval") ? "Friend request has been sent".localized() : "Successfully add friend".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                        publicBanner.show()
+                        publicBanner.showOnScreen()
                         self.isDismiss?()
                         self.navigationController?.popViewController(animated: true)
                     } else {
@@ -859,7 +859,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                         imageView.tintColor = .white
                         publicBanner.dismiss()
                         publicBanner = FloatingNotificationBanner(title: "Server busy, please try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                        publicBanner.show()
+                        publicBanner.showOnScreen()
                         self.isLoadingAddFriend = false
                     }
                 }
@@ -928,7 +928,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                         imageView.tintColor = .white
                         publicBanner.dismiss()
                         publicBanner = FloatingNotificationBanner(title: "Server busy, please try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                        publicBanner.show()
+                        publicBanner.showOnScreen()
                     }
                 }
             }
@@ -960,7 +960,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
             imageView.tintColor = .white
             self.publicBanner.dismiss()
             self.publicBanner = FloatingNotificationBanner(title: "Successfully changed name".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-            self.publicBanner.show()
+            self.publicBanner.showOnScreen()
         }
         navigationItem.backButtonTitle = ""
         navigationController?.show(controller, sender: nil)
@@ -1032,7 +1032,7 @@ extension ProfileViewController: ImageVideoPickerDelegate {
                                     imageView.tintColor = .white
                                     publicBanner.dismiss()
                                     publicBanner = FloatingNotificationBanner(title: "Can't change profile picture, try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                    publicBanner.show()
+                                    publicBanner.showOnScreen()
                                     self.dismissImage?(image, fileDir.lastPathComponent)
                                 })
                             }
@@ -1068,7 +1068,7 @@ extension ProfileViewController: ImageVideoPickerDelegate {
                                     imageView.tintColor = .white
                                     publicBanner.dismiss()
                                     publicBanner = FloatingNotificationBanner(title: "Successfully changed profile picture".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                                    publicBanner.show()
+                                    publicBanner.showOnScreen()
                                     self.dismissImage?(image, fileDir.lastPathComponent)
                                 })
                             }
@@ -1488,7 +1488,7 @@ extension ProfileViewController {
                         imageView.tintColor = .white
                         self.publicBanner.dismiss()
                         self.publicBanner = FloatingNotificationBanner(title: "Server busy, please try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                        self.publicBanner.show()
+                        self.publicBanner.showOnScreen()
                         return
                     }
                     self.user = User.getData(pin: self.data)
@@ -1508,7 +1508,7 @@ extension ProfileViewController {
                     imageView.tintColor = .white
                     self.publicBanner.dismiss()
                     self.publicBanner = FloatingNotificationBanner(title: (blocked ? "You blocked this user" : "You unblocked this user").localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
-                    self.publicBanner.show()
+                    self.publicBanner.showOnScreen()
                 })
             }
         }

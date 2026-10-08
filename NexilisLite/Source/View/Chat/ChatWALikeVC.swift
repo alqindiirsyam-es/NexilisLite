@@ -98,6 +98,8 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
             self.chatGroupMaps.removeAll()
             self.chats.removeAll()
             self.tableView.reloadData()
+            // Offline where the keys are not kept on the device: the list says why it is empty.
+            OfflinePolicy.applyEmptyState(to: self.tableView)
             self.reloadAllData()
         }
     }

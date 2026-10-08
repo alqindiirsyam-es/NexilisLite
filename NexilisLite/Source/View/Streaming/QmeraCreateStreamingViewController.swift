@@ -180,14 +180,14 @@ public class QmeraCreateStreamingViewController: UITableViewController {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Live Streaming session hasn\'t started yet".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                        banner.show()
+                        banner.showOnScreen()
                         return
                     }
                 } else {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "No Network. Please try again.".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     return
                 }
             }
@@ -217,7 +217,7 @@ public class QmeraCreateStreamingViewController: UITableViewController {
                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                 imageView.tintColor = .white
                 let banner = FloatingNotificationBanner(title: "The streaming session has ended".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                banner.show()
+                banner.showOnScreen()
                 return
             } else if self.data.isEmpty {
                 guard let streamingTitle = titleView.text else {
@@ -240,13 +240,13 @@ public class QmeraCreateStreamingViewController: UITableViewController {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Live Streaming title can't be empty".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     return
                 } else if streamingDesc.trimmingCharacters(in: .whitespaces).isEmpty {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Live Streaming description can't be empty".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     return
                 }
                 
@@ -272,13 +272,13 @@ public class QmeraCreateStreamingViewController: UITableViewController {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Please select at least 1 user".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     return
                 } else if type == "6" && groups.count == 0 {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Please select at least 1 group".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     return
                 }
                 
@@ -305,14 +305,14 @@ public class QmeraCreateStreamingViewController: UITableViewController {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Server Busy. Please try again.".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                        banner.show()
+                        banner.showOnScreen()
                         return
                     }
                 } else {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "No Network. Please try again.".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     return
                 }
                 

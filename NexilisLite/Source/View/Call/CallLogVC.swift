@@ -261,7 +261,7 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
                 return
             }
             if !Nexilis.checkingAccess(key: "video_call") {
-                self.view.makeToast("Feature disabled..".localized(), duration: 3)
+                self.view.presentToast("Feature disabled..".localized(), duration: 3)
                 return
             }
             // Fix: only the camera was tested here. A video call with the camera allowed and the
@@ -278,7 +278,7 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                 imageView.tintColor = .white
                 let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                banner.show()
+                banner.showOnScreen()
                 return
             }
             if let user = User.getDataCanNil(pin: call.fPin) {
@@ -291,14 +291,14 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
                 return
             }
             if !Nexilis.checkingAccess(key: "audio_call") {
-                self.view.makeToast("Feature disabled..".localized(), duration: 3)
+                self.view.presentToast("Feature disabled..".localized(), duration: 3)
                 return
             }
             if !CheckConnection.isConnectedToNetwork() {
                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                 imageView.tintColor = .white
                 let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                banner.show()
+                banner.showOnScreen()
                 return
             }
             if let user = User.getDataCanNil(pin: call.fPin) {

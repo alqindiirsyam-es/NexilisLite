@@ -1767,7 +1767,7 @@ extension MediaBrowserViewController: UICollectionViewDataSource, UICollectionVi
             return
         }
         let viewer = MediaViewerViewController()
-        viewer.stripItems = media.map { item in
+        let all = media.map { item in
             var when = ""
             if item.date > 0 {
                 when = DateFormatterPool.shared.string(from: Date(timeIntervalSince1970: item.date / 1000), format: "dd/MM/yy HH:mm")
@@ -1782,10 +1782,14 @@ extension MediaBrowserViewController: UICollectionViewDataSource, UICollectionVi
                 subtitle: when,
                 isStarred: false)
         }
-        viewer.currentStripIndex = index
-        if let ready = MediaViewerViewController.loadMedia(for: viewer.stripItems[index]) {
+        // What has not been downloaded yet is not in the viewer - see downloadedOnly.
+        let openedId = media[index].messageId
+        viewer.stripItems = MediaViewerViewController.downloadedOnly(all, keeping: openedId)
+        viewer.currentStripIndex = viewer.stripItems.firstIndex(where: { $0.messageId == openedId }) ?? 0
+        let stripIndex = viewer.currentStripIndex
+        if let ready = MediaViewerViewController.loadMedia(for: viewer.stripItems[stripIndex]) {
             viewer.media = ready
-            viewer.autoPlaysOnOpen = viewer.stripItems[index].isVideo
+            viewer.autoPlaysOnOpen = viewer.stripItems[stripIndex].isVideo
         }
 
         let stack = UINavigationController(rootViewController: viewer)

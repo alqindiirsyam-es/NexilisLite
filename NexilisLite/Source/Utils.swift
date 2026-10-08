@@ -2508,7 +2508,7 @@ public class DialogUnableAccess: UIViewController {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             return
         }
         Nexilis.showLoader()
@@ -2527,7 +2527,7 @@ public class DialogUnableAccess: UIViewController {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                 })
             }
         }
@@ -2635,14 +2635,14 @@ public class DialogVerifyYou: UIViewController {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Code can't be empty".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             return
         }
         if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             return
         }
         Nexilis.showLoader()
@@ -2664,7 +2664,7 @@ public class DialogVerifyYou: UIViewController {
                                 let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Successfully Sign-In".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                                banner.show()
+                                banner.showOnScreen()
                                 if Nexilis.showFB {
                                     Nexilis.floatingButton?.removeFromSuperview()
                                     FloatingButton.datePull = nil
@@ -2682,7 +2682,7 @@ public class DialogVerifyYou: UIViewController {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Invalid Code".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     self.dismiss(animated: true)
                 })
             } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "3t" {
@@ -2690,7 +2690,7 @@ public class DialogVerifyYou: UIViewController {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Expired Code".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     self.dismiss(animated: true)
                 })
             } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "4u" {
@@ -2698,7 +2698,7 @@ public class DialogVerifyYou: UIViewController {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "You have been blocked".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     self.dismiss(animated: true)
                 })
             } else {
@@ -2706,7 +2706,7 @@ public class DialogVerifyYou: UIViewController {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                 })
             }
         }
@@ -2848,7 +2848,7 @@ public class DialogSignIn: UIViewController {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             return
         }
         Nexilis.showLoader()
@@ -2858,7 +2858,7 @@ public class DialogSignIn: UIViewController {
                     let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "The other device has been blocked".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     
                     self.dismiss(animated: true)
                 })
@@ -2867,7 +2867,7 @@ public class DialogSignIn: UIViewController {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                 })
             }
         }
@@ -3262,7 +3262,7 @@ public class ValidationTransactionLimit: UIViewController, UITextFieldDelegate {
             let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Successfully changed".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             self.navigationController?.popViewController(animated: true)
         }
     }
@@ -4362,6 +4362,20 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     public var subtitleCustom = ""
     /// What was written with the picture, drawn across the bottom of it.
     public var caption = ""
+    /// Only what is on this device, and whatever is being opened.
+    ///
+    /// Fix: a picture or video still waiting to be downloaded was a page of the viewer like any
+    /// other - a blurred thumbnail with nothing behind it, met on the way past to the pictures
+    /// that were there. WhatsApp leaves those out of its viewer: the conversation is where they
+    /// are fetched, and the viewer shows what can be seen. Once one has been downloaded it is in
+    /// the strip the next time the viewer is opened.
+    public static func downloadedOnly(_ items: [StripItem], keeping messageId: String) -> [StripItem] {
+        return items.filter { item in
+            item.messageId == messageId
+                || ThumbnailFallback.isOnDevice(item.mediaFileName)
+        }
+    }
+
     /// Every picture and video of the conversation, for the strip along the bottom.
     /// Set by whoever opens this screen on a video, so it plays without being asked twice.
     public var autoPlaysOnOpen = false
@@ -4426,6 +4440,25 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         didSet { setNeedsStatusBarAppearanceUpdate() }
     }
 
+    /// From iOS 26 the viewer is drawn the way the system's own (and WhatsApp's) is: on the
+    /// screen's own background, light or dark with the phone, with its controls on glass - a
+    /// round button for share and for delete, a capsule for forward and star, and the video's
+    /// controls in a capsule under the title. Before iOS 26 it keeps its dark look.
+    private var usesGlassChrome: Bool {
+        if #available(iOS 26.0, *) {
+            return true
+        }
+        return false
+    }
+    /// The colour of everything drawn over the picture.
+    private var chromeTint: UIColor {
+        return usesGlassChrome ? .label : .white
+    }
+    /// The play/pause at the start of the video capsule, from iOS 26.
+    private let barPlayButton = UIButton(type: .system)
+    /// The glass behind the video's controls, from iOS 26.
+    private var videoBarGlass: UIVisualEffectView?
+
     override var prefersStatusBarHidden: Bool {
         return isNavigationBarHidden
     }
@@ -4465,7 +4498,7 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         }
 
         // Background view
-        backgroundView.backgroundColor = .black
+        backgroundView.backgroundColor = usesGlassChrome ? .systemBackground : .black
         backgroundView.alpha = 0
         backgroundView.frame = view.bounds
         if isSecure {
@@ -4577,7 +4610,39 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         pager.layoutIfNeeded()
         movePager(to: currentStripIndex, animated: false)
         adoptCurrentPage()
-        stripCollection.scrollToItem(at: IndexPath(item: currentStripIndex, section: 0), at: .centeredHorizontally, animated: false)
+        centerStripOnOpening()
+    }
+
+    /// Whether the strip has been put on the thumbnail the viewer was opened at.
+    private var hasCenteredStripOnOpening = false
+
+    /// Puts the opened picture's thumbnail in the middle of the strip.
+    ///
+    /// Fix: opening a picture left the strip at its start, and only a drag brought it to the
+    /// picture on screen. The strip was asked to scroll in the same pass that first gave the pager
+    /// a width - but the strip sits in the bottom stack, which had not been laid out yet: no width,
+    /// no insets, no cells, so `scrollToItem` had nothing to scroll and did nothing, and that pass
+    /// was never repeated. The offset is now worked out from the thumbnail's own place in the
+    /// strip, and tried on every layout pass until the strip has a size to do it in.
+    private func centerStripOnOpening() {
+        guard !hasCenteredStripOnOpening, stripCollection != nil, !stripItems.isEmpty,
+              currentStripIndex >= 0, currentStripIndex < stripItems.count else {
+            return
+        }
+        if stripCollection.bounds.width <= 0 {
+            bottomStack.layoutIfNeeded()
+        }
+        guard stripCollection.bounds.width > 0 else {
+            return
+        }
+        layoutStripInsets()
+        stripCollection.layoutIfNeeded()
+        guard let place = stripCollection.layoutAttributesForItem(at: IndexPath(item: currentStripIndex, section: 0)) else {
+            return
+        }
+        hasCenteredStripOnOpening = true
+        let x = place.center.x - stripCollection.bounds.width / 2
+        stripCollection.setContentOffset(CGPoint(x: x, y: stripCollection.contentOffset.y), animated: false)
     }
 
     /// Lets the picture run behind the bar rather than beginning underneath it.
@@ -4593,8 +4658,9 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         bar.scrollEdgeAppearance = appearance
         bar.compactAppearance = appearance
         bar.isTranslucent = true
-        bar.tintColor = .white
-        bar.overrideUserInterfaceStyle = .dark
+        bar.tintColor = chromeTint
+        // From iOS 26 the bar follows the phone, light or dark, with the rest of the viewer.
+        bar.overrideUserInterfaceStyle = usesGlassChrome ? .unspecified : .dark
         // Fix: an appearance is not the whole story. backgroundColor and barTintColor are set
         // straight onto the bar by the shared style this viewer is opened with, and they paint
         // over a transparent appearance - which is why the top stayed blue.
@@ -4637,13 +4703,23 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         topScrim.layer.mask = topScrimMask
         topScrim.alpha = MediaViewerViewController.topScrimStrength
         topScrim.isUserInteractionEnabled = false
+        if usesGlassChrome {
+            // Fix: from iOS 26 the title is drawn in the text colour with no halo, and over a
+            // picture that fills the screen it simply vanished - black on a dark photo. The header
+            // stands on a band of the bar's own material instead, the way WhatsApp has it: light
+            // or dark with the phone, solid enough for the name and date to read over anything.
+            topScrim.effect = UIBlurEffect(style: .systemChromeMaterial)
+            topScrim.layer.mask = nil
+            topScrim.alpha = 1
+        }
         view.addSubview(topScrim)
     }
 
     private func layoutTopScrim() {
         // Kept above the pictures, which are added and moved beneath it as pages come and go.
         view.bringSubviewToFront(topScrim)
-        let height = (navigationController?.navigationBar.frame.maxY ?? 88) + 40
+        // From iOS 26 a band exactly as deep as the header; before it, a fade that runs past it.
+        let height = (navigationController?.navigationBar.frame.maxY ?? 88) + (usesGlassChrome ? 0 : 40)
         topScrim.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: height)
         topScrimMask.frame = topScrim.bounds
     }
@@ -5227,9 +5303,11 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
             captionLabel.bottomAnchor.constraint(equalTo: captionScroll.contentLayoutGuide.bottomAnchor),
             captionLabel.widthAnchor.constraint(equalTo: captionScroll.frameLayoutGuide.widthAnchor)
         ])
-        captionLabel.textColor = .white
+        captionLabel.textColor = chromeTint
         captionLabel.font = UIFont.systemFont(ofSize: 15)
-        MediaViewerViewController.applyTextShadow(to: captionLabel)
+        if !usesGlassChrome {
+            MediaViewerViewController.applyTextShadow(to: captionLabel)
+        }
         captionLabel.numberOfLines = MediaViewerViewController.collapsedCaptionLines
         captionLabel.lineBreakMode = .byTruncatingTail
         // Fix: a caption was shown exactly as it is stored, and a mention is stored as the pin it
@@ -5277,7 +5355,11 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
 
         view.bringSubviewToFront(bottomStack)
 
-        // Dark enough for white to read on, over any picture.
+        // Dark enough for white to read on, over any picture. Not from iOS 26: the controls stand on
+        // glass of their own there, over the picture or the screen's background.
+        guard !usesGlassChrome else {
+            return
+        }
         let scrim = UIView()
         scrim.backgroundColor = UIColor.black.withAlphaComponent(0.75)
         scrim.isUserInteractionEnabled = false
@@ -5293,6 +5375,10 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
 
     private func buildActionBar() {
         actionBar.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        if #available(iOS 26.0, *) {
+            buildGlassActionBar()
+            return
+        }
         // Fix: this asked whether a player existed, and the row is rebuilt before the previous
         // video is torn down - so arriving on a picture still found the player of the video just
         // left and kept offering play. What matters is what is on screen, which the strip knows.
@@ -5316,6 +5402,62 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
             button.addTarget(self, action: action, for: .touchUpInside)
             button.heightAnchor.constraint(equalToConstant: 40).isActive = true
             actionBar.addArrangedSubview(button)
+        }
+        actionBar.isHidden = actionBar.arrangedSubviews.isEmpty
+    }
+
+    /// The row of actions from iOS 26: share on a round glass button at the left, forward and star
+    /// together on a glass capsule in the middle, delete on a round glass button at the right. Play
+    /// and pause live in the video's own capsule under the title, not here.
+    @available(iOS 26.0, *)
+    private func buildGlassActionBar() {
+        actionBar.distribution = .equalSpacing
+        actionBar.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 10, leading: 20, bottom: 8, trailing: 20)
+        func button(_ symbol: String, _ action: Selector) -> UIButton {
+            let button = UIButton(type: .system)
+            button.setImage(UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 19, weight: .regular)), for: .normal)
+            button.tintColor = .label
+            button.addTarget(self, action: action, for: .touchUpInside)
+            button.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                button.widthAnchor.constraint(equalToConstant: 52),
+                button.heightAnchor.constraint(equalToConstant: 52)
+            ])
+            return button
+        }
+        func glass(holding buttons: [UIButton]) -> UIView {
+            let effect = UIGlassEffect(style: .regular)
+            effect.isInteractive = true
+            let glass = UIVisualEffectView(effect: effect)
+            glass.cornerConfiguration = .capsule()
+            let row = UIStackView(arrangedSubviews: buttons)
+            row.axis = .horizontal
+            row.spacing = 4
+            row.translatesAutoresizingMaskIntoConstraints = false
+            glass.contentView.addSubview(row)
+            NSLayoutConstraint.activate([
+                row.topAnchor.constraint(equalTo: glass.contentView.topAnchor),
+                row.bottomAnchor.constraint(equalTo: glass.contentView.bottomAnchor),
+                row.leadingAnchor.constraint(equalTo: glass.contentView.leadingAnchor, constant: buttons.count > 1 ? 8 : 0),
+                row.trailingAnchor.constraint(equalTo: glass.contentView.trailingAnchor, constant: buttons.count > 1 ? -8 : 0)
+            ])
+            return glass
+        }
+        if onShare != nil {
+            actionBar.addArrangedSubview(glass(holding: [button("square.and.arrow.up", #selector(tapShare))]))
+        }
+        var middle: [UIButton] = []
+        if onForward != nil {
+            middle.append(button("arrowshape.turn.up.right", #selector(tapForward)))
+        }
+        if onStar != nil {
+            middle.append(button(isStarred ? "star.fill" : "star", #selector(tapStar)))
+        }
+        if !middle.isEmpty {
+            actionBar.addArrangedSubview(glass(holding: middle))
+        }
+        if onDelete != nil {
+            actionBar.addArrangedSubview(glass(holding: [button("trash", #selector(tapDelete))]))
         }
         actionBar.isHidden = actionBar.arrangedSubviews.isEmpty
     }
@@ -5407,6 +5549,7 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         layoutVideoControls()
         layoutTopScrim()
         layoutStripInsets()
+        centerStripOnOpening()
         // Fix: this put the player back across the whole screen on every layout pass, undoing the
         // placement that keeps it on its own page - and, now, on the poster it is zoomed with.
         positionVideoHost()
@@ -5512,18 +5655,22 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         let titleLabel = UILabel()
         titleLabel.text = title
         titleLabel.font = UIFont.systemFont(ofSize: 15)
-        titleLabel.textColor = .white
+        titleLabel.textColor = chromeTint
         // Fix: keeping white legible used to mean darkening the whole top of the picture. A
         // shadow on the letters themselves does the same work where it is actually needed -
         // right behind the strokes - so the shadow above can be light enough to see through.
-        MediaViewerViewController.applyTextShadow(to: titleLabel)
+        if !usesGlassChrome {
+            MediaViewerViewController.applyTextShadow(to: titleLabel)
+        }
         titleLabel.textAlignment = .center
 
         let subtitleLabel = UILabel()
         subtitleLabel.text = subtitle
         subtitleLabel.font = UIFont.systemFont(ofSize: 12)
-        subtitleLabel.textColor = UIColor.white.withAlphaComponent(0.85)
-        MediaViewerViewController.applyTextShadow(to: subtitleLabel)
+        subtitleLabel.textColor = usesGlassChrome ? .secondaryLabel : UIColor.white.withAlphaComponent(0.85)
+        if !usesGlassChrome {
+            MediaViewerViewController.applyTextShadow(to: subtitleLabel)
+        }
         subtitleLabel.textAlignment = .center
 
         let stack = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
@@ -5593,6 +5740,7 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         slider.value = 0
         timeCurrentLabel.text = "0:00"
         buildActionBar()
+        refreshBarPlayButton()
 
         // A video opened from the conversation starts on its own, the way the reference does.
         // Only that one: swiping onto a video further along the strip leaves it waiting, so the
@@ -5640,28 +5788,41 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         // at the foot of the screen, on top of the strip of thumbnails and the row of actions.
         videoBar.backgroundColor = UIColor.black.withAlphaComponent(0.35)
         view.addSubview(videoBar)
+        if #available(iOS 26.0, *) {
+            // A glass capsule under the title, starting with its own play and pause.
+            videoBar.backgroundColor = .clear
+            let glass = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+            glass.cornerConfiguration = .capsule()
+            glass.isUserInteractionEnabled = false
+            videoBar.addSubview(glass)
+            videoBarGlass = glass
+            barPlayButton.setImage(UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .regular)), for: .normal)
+            barPlayButton.tintColor = .label
+            barPlayButton.addTarget(self, action: #selector(togglePlayPause), for: .touchUpInside)
+            videoBar.addSubview(barPlayButton)
+        }
 
         pipButton.setImage(UIImage(systemName: "pip.enter", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .regular)), for: .normal)
-        pipButton.tintColor = .white
+        pipButton.tintColor = chromeTint
         pipButton.addTarget(self, action: #selector(togglePictureInPicture), for: .touchUpInside)
         videoBar.addSubview(pipButton)
 
         // Current time
         timeCurrentLabel.text = "0:00"
-        timeCurrentLabel.textColor = .white
+        timeCurrentLabel.textColor = chromeTint
         timeCurrentLabel.font = .systemFont(ofSize: 13)
         videoBar.addSubview(timeCurrentLabel)
 
         // Remaining time
         timeRemainingLabel.text = "-0:00"
-        timeRemainingLabel.textColor = .white
+        timeRemainingLabel.textColor = chromeTint
         timeRemainingLabel.font = .systemFont(ofSize: 13)
         timeRemainingLabel.textAlignment = .right
         videoBar.addSubview(timeRemainingLabel)
 
         // Playback speed button
         speedButton.setTitle("1×", for: .normal)
-        speedButton.tintColor = .white
+        speedButton.tintColor = chromeTint
         speedButton.titleLabel?.font = .boldSystemFont(ofSize: 15)
         speedButton.addTarget(self, action: #selector(toggleSpeed), for: .touchUpInside)
         videoBar.addSubview(speedButton)
@@ -5672,7 +5833,11 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         slider.setThumbImage(thumbImg, for: .highlighted)
         slider.minimumValue = 0
         slider.maximumValue = 1
-        slider.tintColor = .white
+        slider.tintColor = chromeTint
+        if usesGlassChrome {
+            // A white knob needs an edge on light glass.
+            slider.maximumTrackTintColor = UIColor.label.withAlphaComponent(0.2)
+        }
         slider.addTarget(self, action: #selector(sliderChanged(_:)), for: .valueChanged)
         videoBar.addSubview(slider)
 
@@ -5759,6 +5924,11 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         let barHeight: CGFloat = 44
         let top = (navigationController?.navigationBar.frame.maxY ?? 88) + 4
         videoBar.frame = CGRect(x: 0, y: top, width: view.bounds.width, height: barHeight)
+        if let glass = videoBarGlass {
+            // The capsule stands in from the edges, the way the bar's own glass buttons do.
+            videoBar.frame = CGRect(x: 12, y: top, width: view.bounds.width - 24, height: barHeight)
+            glass.frame = videoBar.bounds
+        }
         positionVideoHost()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -5768,6 +5938,10 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
 
         let row = (barHeight - 20) / 2
         timeCurrentLabel.frame = CGRect(x: padding, y: row, width: labelWidth, height: 20)
+        if videoBarGlass != nil {
+            barPlayButton.frame = CGRect(x: padding - 4, y: (barHeight - 32) / 2, width: 32, height: 32)
+            timeCurrentLabel.frame = CGRect(x: barPlayButton.frame.maxX + 8, y: row, width: labelWidth, height: 20)
+        }
         pipButton.frame = CGRect(x: videoBar.bounds.width - padding - 26, y: row - 3, width: 26, height: 26)
         speedButton.frame = CGRect(x: pipButton.frame.minX - 8 - 30, y: row, width: 30, height: 20)
         timeRemainingLabel.frame = CGRect(x: speedButton.frame.minX - labelWidth - 6, y: row, width: labelWidth, height: 20)
@@ -5799,6 +5973,13 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     @objc private func videoDidFinish() {
         isVideoPlaying = false
         playPauseButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
+        refreshBarPlayButton()
+    }
+
+    /// The capsule's play/pause says what pressing it will do.
+    private func refreshBarPlayButton() {
+        barPlayButton.setImage(UIImage(systemName: isVideoPlaying ? "pause.fill" : "play.fill",
+                                       withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .regular)), for: .normal)
     }
 
     @objc private func togglePlayPause() {
@@ -5826,6 +6007,7 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         isVideoPlaying.toggle()
         // The action row carries the same play and pause, so it changes with it.
         buildActionBar()
+        refreshBarPlayButton()
     }
 
     /// Hands the video to the system's floating window.
@@ -5882,7 +6064,7 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
             self.videoBar.alpha = self.isNavigationBarHidden ? 0 : 1
             self.blurBackground.alpha = self.isNavigationBarHidden ? 0 : 1
             self.bottomStack.alpha = self.isNavigationBarHidden ? 0 : 1
-            self.topScrim.alpha = self.isNavigationBarHidden ? 0 : MediaViewerViewController.topScrimStrength
+            self.topScrim.alpha = self.isNavigationBarHidden ? 0 : (self.usesGlassChrome ? 1 : MediaViewerViewController.topScrimStrength)
         }
     }
     

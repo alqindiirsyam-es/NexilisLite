@@ -428,7 +428,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                   let param1 = dict["param1"] as? String else {
                 return
             }
-            self.view.makeToast(param1, duration: 3)
+            self.view.presentToast(param1, duration: 3)
         } else if message.name == "blockUser" {
             guard let dict = message.body as? [String: AnyObject],
                   let param1 = dict["param1"] as? String,
@@ -637,7 +637,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                 imageView.tintColor = .white
                 let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                banner.show()
+                banner.showOnScreen()
                 return
             }
             Nexilis.showLoader()
@@ -664,14 +664,14 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Failed to back to Company App".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                banner.show()
+                                banner.showOnScreen()
                             })
                         } else {
                             Nexilis.hideLoader(completion: {
                                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                banner.show()
+                                banner.showOnScreen()
                             })
                         }
                     }
@@ -681,7 +681,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                             imageView.tintColor = .white
                             let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                            banner.show()
+                            banner.showOnScreen()
                         })
                     }
                 }

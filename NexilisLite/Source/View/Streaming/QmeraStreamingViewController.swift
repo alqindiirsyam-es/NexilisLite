@@ -598,7 +598,7 @@ class QmeraStreamingViewController: UIViewController {
             let submitAction = UIAlertAction(title: "Submit".localized(), style: .default, handler: { (action) -> Void in
                 let textField = self.alert?.textFields![0]
                 if textField!.text!.isEmpty {
-                    self.view.makeToast((type == 0 ? "Title".localized() : "Tagline".localized()) + " " + "can't be empty".localized(), duration: 3)
+                    self.view.presentToast((type == 0 ? "Title".localized() : "Tagline".localized()) + " " + "can't be empty".localized(), duration: 3)
                     return
                 }
                 if textField!.text! == (type == 0 ? (self.streamingData["title"] as! String) : (self.streamingData["tagline"] as! String)) {
@@ -608,7 +608,7 @@ class QmeraStreamingViewController: UIViewController {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     return
                 }
                 
@@ -623,7 +623,7 @@ class QmeraStreamingViewController: UIViewController {
                         } else {
                             self.tagline.text = textField!.text!
                         }
-                        self.view.makeToast("Successfully changed".localized(), duration: 3)
+                        self.view.presentToast("Successfully changed".localized(), duration: 3)
                     }
                 }
             })

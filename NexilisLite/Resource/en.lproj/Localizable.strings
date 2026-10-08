@@ -23,3 +23,8 @@
 "Requester" = "Requester";
 "End session as" = "End session as";
 "Choose the status of this Call Center session" = "Choose the status of this Call Center session";
+"Connecting..." = "Connecting...";
+"You cannot open a conversation when you're offline." = "You cannot open a conversation when you're offline.";
+"You cannot open a chat when you're offline. The conversation will automatically close in 5 seconds." = "You cannot open a chat when you're offline. The conversation will automatically close in 5 seconds.";
+"Invalid App State!" = "Invalid App State!";
+"Please re-open app again, the application will automatically stop. To try again, please use stable connection!" = "Please re-open app again, the application will automatically stop. To try again, please use stable connection!";

@@ -6958,7 +6958,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         }
         let entry = VideoNoteEntryPoint(owner: self, anchor: buttonSendChat)
         entry.onHint = { [weak self] text in
-            self?.view.makeToast(text, duration: 2)
+            self?.view.presentToast(text, duration: 2)
         }
         entry.onWillPresent = { [weak self] in
             guard let self = self else { return }
@@ -7052,7 +7052,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             case .heldByAnotherApp:
                 APIS.showMicrophoneBusyElsewhere()
             case .audioSessionRefused:
-                self.view.makeToast("Could not start recording. Try again.".localized(), duration: 3)
+                self.view.presentToast("Could not start recording. Try again.".localized(), duration: 3)
             }
         }
     }
@@ -7082,7 +7082,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             }
             try FileManager.default.moveItem(at: url, to: destination)
         } catch {
-            view.makeToast("Failed to save the recording".localized(), duration: 3)
+            view.presentToast("Failed to save the recording".localized(), duration: 3)
             return
         }
         sendChat(message_text: "\(originalName)|",
@@ -7097,7 +7097,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         VideoNote.package(recording: url) { [weak self] videoId, thumbId in
             guard let self = self else { return }
             guard let videoId = videoId, let thumbId = thumbId else {
-                self.view.makeToast("Failed to save the recording".localized(), duration: 3)
+                self.view.presentToast("Failed to save the recording".localized(), duration: 3)
                 return
             }
             // The first send gets the same mark as a resend, so the control does not depend on
@@ -7137,7 +7137,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         if viewController is EditorGroup && !carriesAttachment && dataMessageForward == nil {
             if ((textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray && attachment_flag != "11") || textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ) {
                 dismissKeyboard()
-                viewController.view.makeToast("Write Messages".localized(), duration: 3)
+                viewController.view.presentToast("Write Messages".localized(), duration: 3)
                 if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized()) {
                     textFieldSend.text = ""
                 }
@@ -7244,7 +7244,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             
             if !protectionType.isEmpty {
                 DispatchQueue.main.async {
-                    self.view.makeToast("Your message is protected with sanitized \(protectionType) (Message Guard)".localized(), duration: 3, position: .center)
+                    self.view.presentToast("Your message is protected with sanitized \(protectionType) (Message Guard)".localized(), duration: 3, position: .center)
                 }
             }
         }
@@ -9986,7 +9986,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                             imageView.tintColor = .white
                             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                            banner.show()
+                            banner.showOnScreen()
                         }
                         return
                     }
@@ -10137,7 +10137,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             self.showEditMessageView(at: indexPath!)
         })
         let translate = chatMenuAction(title: "Translate".localized(), image: UIImage(systemName: "t.bubble"), handler: {(_) in
-            self.view.makeToast("Translating...".localized(), duration: 3)
+            self.view.presentToast("Translating...".localized(), duration: 3)
             var translation: String = "English"
             let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
             if lang == "id" {
@@ -10157,7 +10157,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     let response = response as? HTTPURLResponse
                     if response?.statusCode != 200 || error != nil {
                         DispatchQueue.main.async {
-                            self.view.makeToast("There is an error occurred while translating your message. Please try again or check your network connection.".localized(), duration: 3)
+                            self.view.presentToast("There is an error occurred while translating your message. Please try again or check your network connection.".localized(), duration: 3)
                         }
                         return
                     }
@@ -10177,7 +10177,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             }
         })
         let gcs = chatMenuAction(title: "Get Chat Suggestion".localized(), image: UIImage(systemName: "exclamationmark.bubble"), handler: {(_) in
-            self.view.makeToast("Getting chat suggestion...".localized(), duration: 3)
+            self.view.presentToast("Getting chat suggestion...".localized(), duration: 3)
             let payload: [String : Any] = [
                 "role": "user",
                 "content": ChatMessageText.spoken(of: dataMessages[indexPath!.row])
@@ -10192,7 +10192,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     let response = response as? HTTPURLResponse
                     if response?.statusCode != 200 || error != nil {
                         DispatchQueue.main.async {
-                            self.view.makeToast("There is an error occurred while getting chat suggestion for you. Please try again or check your network connection.".localized(), duration: 3)
+                            self.view.presentToast("There is an error occurred while getting chat suggestion for you. Please try again or check your network connection.".localized(), duration: 3)
                         }
                         return
                     }
@@ -10566,7 +10566,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                             imageView.tintColor = .white
                             let banner = FloatingNotificationBanner(title: "Failed to pin or unpin message, make sure you are connected to internet".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                            banner.show()
+                            banner.showOnScreen()
                         }
                         completion(false)
                     }
@@ -10575,7 +10575,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                        banner.show()
+                        banner.showOnScreen()
                     }
                     completion(false)
                 }
@@ -11568,7 +11568,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
     /// after it either, the last one before it.
     private func jump(toDay day: Date) {
         guard let messageId = messageId(nearestTo: day), !messageId.isEmpty else {
-            view.makeToast("Not found".localized(), duration: 2)
+            view.presentToast("Not found".localized(), duration: 2)
             return
         }
         highlightMessage(messageId)
@@ -11657,7 +11657,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             text = text + "\n\n\nchat " + "Powered by Nexilis".localized()
             DispatchQueue.main.async {
                 UIPasteboard.general.string = text
-                self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
+                self.view.presentToast("Text coppied to clipboard".localized(), duration: 3)
             }
             cancelAction()
         } else if forwardSession {
@@ -11685,11 +11685,11 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     contentText.append(spoken)
                     contentText.append("\n\n")
                 } else {
-                    self.view.makeToast("Cannot get messages to summarize".localized(), duration: 3)
+                    self.view.presentToast("Cannot get messages to summarize".localized(), duration: 3)
                     return
                 }
             }
-            self.view.makeToast("Summarizing chat...".localized(), duration: 3)
+            self.view.presentToast("Summarizing chat...".localized(), duration: 3)
             let payload: [String : Any] = [
                 "role": "user",
                 "content": contentText
@@ -11704,7 +11704,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     let response = response as? HTTPURLResponse
                     if response?.statusCode != 200 || error != nil {
                         DispatchQueue.main.async {
-                            self.view.makeToast("There is an error occurred while getting chat suggestion for you. Please try again or check your network connection.".localized(), duration: 3)
+                            self.view.presentToast("There is an error occurred while getting chat suggestion for you. Please try again or check your network connection.".localized(), duration: 3)
                         }
                         return
                     }
@@ -11716,7 +11716,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                     alertController.addAction(UIAlertAction(title: "Copy".localized(), style: .default, handler: { _ in
                                         DispatchQueue.main.async {
                                             UIPasteboard.general.string = content
-                                            self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
+                                            self.view.presentToast("Text coppied to clipboard".localized(), duration: 3)
                                         }
                                     }))
                                     alertController.addAction(UIAlertAction(title: "Close".localized(), style: .cancel, handler: nil))
@@ -11916,7 +11916,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                     if FileManager.default.fileExists(atPath: imageURL.path) {
                                         let image    = UIImage(contentsOfFile: imageURL.path)
                                         UIPasteboard.general.image = image
-                                        self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
+                                        self.view.presentToast("Image coppied to clipboard".localized(), duration: 3)
                                     }
                                     else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                         do {
@@ -11927,7 +11927,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                                 }
                                                 let image = UIImage(data: imageData)
                                                 UIPasteboard.general.image = image
-                                                self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
+                                                self.view.presentToast("Image coppied to clipboard".localized(), duration: 3)
                                             }
                                         } catch {
                                             
@@ -11940,7 +11940,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                         if (index == 0) {
                             DispatchQueue.main.async {
                                 UIPasteboard.general.string = ChatMessageText.spoken(of: dataMessages[indexPath.row])
-                                self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
+                                self.view.presentToast("Text coppied to clipboard".localized(), duration: 3)
                             }
                         } else {
                             DispatchQueue.main.async {
@@ -11952,7 +11952,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                     if FileManager.default.fileExists(atPath: imageURL.path) {
                                         let image    = UIImage(contentsOfFile: imageURL.path)
                                         UIPasteboard.general.image = image
-                                        self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
+                                        self.view.presentToast("Image coppied to clipboard".localized(), duration: 3)
                                     } else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                         do {
                                             if var imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
@@ -11962,7 +11962,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                                 }
                                                 let image = UIImage(data: imageData)
                                                 UIPasteboard.general.image = image
-                                                self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
+                                                self.view.presentToast("Image coppied to clipboard".localized(), duration: 3)
                                             }
                                         } catch {
                                             
@@ -12011,7 +12011,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                        banner.show()
+                        banner.showOnScreen()
                     } else {
                         if let groupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
                             for i in 0..<groupingImages.count {
@@ -12142,7 +12142,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         }
         let copyAction: () -> Void = { [weak self] in
             UIPasteboard.general.string = urlString
-            self?.view.makeToast("Link Copied".localized(), duration: 3)
+            self?.view.presentToast("Link Copied".localized(), duration: 3)
         }
         // Fix: only offer "Open in Chrome" when Chrome is actually installed.
         // canOpenURL against a custom scheme silently returns false unless that
@@ -13217,7 +13217,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                             let message = Nexilis.checkingAccessAlert(key: "live_streaming").component(1, separatedBy: "|")
                             APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
                         } else {
-                            UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                            UIApplication.shared.visibleViewController?.view.presentToast("Feature disabled".localized(), duration: 5)
                         }
                         return
                     }
@@ -16783,7 +16783,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
+            banner.showOnScreen()
             return
         }
         DispatchQueue.global().async {
@@ -16811,7 +16811,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         if row != nil && section != nil {
                             self.tableChatView.reloadRowsKeepingPlace(at: [IndexPath(row: row!, section: section!)])
                         }
-                        self.view.makeToast("Confirmation Success.".localized(), duration: 3)
+                        self.view.presentToast("Confirmation Success.".localized(), duration: 3)
                     }
                 }
             }
@@ -16886,7 +16886,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             // Only hand over the strip when the picture being opened is in it. A one-time
             // picture is left out of the run on purpose, and a strip that does not contain what
             // was tapped would open the viewer on somebody else's picture.
-            let strip = self.conversationMediaStrip()
+            // What has not been downloaded yet is not in the viewer - see downloadedOnly.
+            let strip = MediaViewerViewController.downloadedOnly(self.conversationMediaStrip(), keeping: messageId)
             if let opened = strip.firstIndex(where: { $0.messageId == messageId }) {
                 imageViewer.stripItems = strip
                 imageViewer.currentStripIndex = opened
@@ -17400,7 +17401,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 // they become a mention again (see adoptPastedMentions), and pasted into a
                 // conversation of two they stay the words they look like.
                 UIPasteboard.general.string = written
-                self?.view.makeToast("Copied".localized(), duration: 2)
+                self?.view.presentToast("Copied".localized(), duration: 2)
             })
         }
         if isFriend {
@@ -17433,20 +17434,20 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             return
         }
         guard Nexilis.checkingAccess(key: video ? "video_call" : "audio_call") else {
-            view.makeToast("Feature disabled..".localized(), duration: 3)
+            view.presentToast("Feature disabled..".localized(), duration: 3)
             return
         }
         guard let person = User.getDataCanNil(pin: pin) else {
             return
         }
         if person.ex_block == "1" || person.ex_block == "-1" {
-            view.makeToast(person.ex_block == "1"
+            view.presentToast(person.ex_block == "1"
                            ? "You blocked this user".localized()
                            : "You have been blocked by this user".localized(), duration: 3)
             return
         }
         guard CheckConnection.isConnectedToNetwork() else {
-            view.makeToast("Check your connection".localized(), duration: 3)
+            view.presentToast("Check your connection".localized(), duration: 3)
             return
         }
         if video {

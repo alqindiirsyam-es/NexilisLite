@@ -468,7 +468,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     return
                 }
                 let alertController = LibAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
@@ -578,7 +578,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     return
                 }
                 Nexilis.showLoader()
@@ -605,7 +605,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                     let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                                     imageView.tintColor = .white
                                     let banner = FloatingNotificationBanner(title: "Successfully Sign-Out".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                                    banner.show()
+                                    banner.showOnScreen()
                                     if Nexilis.showFB {
                                         Nexilis.floatingButton?.removeFromSuperview()
                                         FloatingButton.datePull = nil
@@ -629,7 +629,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                     imageView.tintColor = .white
                                     let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                    banner.show()
+                                    banner.showOnScreen()
                                 })
                             }
                         }
@@ -639,7 +639,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                banner.show()
+                                banner.showOnScreen()
                             })
                         }
                     }
@@ -721,7 +721,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     return
                 }
                 Nexilis.showLoader()
@@ -754,14 +754,14 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                     imageView.tintColor = .white
                                     let banner = FloatingNotificationBanner(title: "Failed to back to Company App".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                    banner.show()
+                                    banner.showOnScreen()
                                 })
                             } else {
                                 Nexilis.hideLoader(completion: {
                                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                     imageView.tintColor = .white
                                     let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                    banner.show()
+                                    banner.showOnScreen()
                                 })
                             }
                         }
@@ -771,7 +771,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                banner.show()
+                                banner.showOnScreen()
                             })
                         }
                     }
@@ -812,7 +812,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     return
                 }
                 Nexilis.showLoader()
@@ -825,7 +825,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                     let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                                     imageView.tintColor = .white
                                     let banner = FloatingNotificationBanner(title: "Successfully Sign-In Admin".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                                    banner.show()
+                                    banner.showOnScreen()
                                 }
                             }
                         } else {
@@ -843,7 +843,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                     let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                                     imageView.tintColor = .white
                                     let banner = FloatingNotificationBanner(title: "Successfully Sign-In Internal Team".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                                    banner.show()
+                                    banner.showOnScreen()
                                 }
                             }
                         } else {
@@ -906,7 +906,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                    banner.show()
+                    banner.showOnScreen()
                     return
                 }
                 if type == "admin" {
@@ -916,7 +916,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                 let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Admin password changed successfully".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                                banner.show()
+                                banner.showOnScreen()
                             }
                         }
                     })
@@ -927,7 +927,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                 let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Internal password changed successfully".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                                banner.show()
+                                banner.showOnScreen()
                             }
                         }
                     })
@@ -979,12 +979,12 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Username or password does not match".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                        banner.show()
+                        banner.showOnScreen()
                     } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "20" {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Invalid password".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                        banner.show()
+                        banner.showOnScreen()
                     }
                 }
             } else {
@@ -992,7 +992,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Unable to access servers".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                    banner.show()
+                    banner.showOnScreen()
                 }
             }
             completion(result)
@@ -1014,12 +1014,12 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Username or password does not match".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                        banner.show()
+                        banner.showOnScreen()
                     } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "20" {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Invalid password".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                        banner.show()
+                        banner.showOnScreen()
                     }
                 }
             } else {
@@ -1027,7 +1027,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Unable to access servers".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                    banner.show()
+                    banner.showOnScreen()
                 }
             }
             completion(result)
@@ -1051,12 +1051,12 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Username or password does not match".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                        banner.show()
+                        banner.showOnScreen()
                     } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "20" {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Invalid password".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                        banner.show()
+                        banner.showOnScreen()
                     }
                 }
             } else {
@@ -1064,7 +1064,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Unable to access servers".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                    banner.show()
+                    banner.showOnScreen()
                 }
             }
             completion(result)
@@ -1088,12 +1088,12 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Username or password does not match".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                        banner.show()
+                        banner.showOnScreen()
                     } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "20" {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Invalid password".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                        banner.show()
+                        banner.showOnScreen()
                     }
                 }
             } else {
@@ -1101,7 +1101,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Unable to access servers".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .top)
-                    banner.show()
+                    banner.showOnScreen()
                 }
             }
             completion(result)
