@@ -107,6 +107,8 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
     
     @objc func autoDownloadSwitch() {
         SecureUserDefaults.shared.set(switchAutoDownload.isOn, forKey: "autoDownload")
+        // Notifications attach a picture or a video only when this is on.
+        NotificationShare.noteAutoDownload(switchAutoDownload.isOn)
     }
     
     func makeMenu(){

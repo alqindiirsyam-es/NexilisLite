@@ -1363,26 +1363,18 @@ extension GroupDetailViewController {
                 mediaFileName: video.isEmpty ? image : video,
                 isVideo: !video.isEmpty,
                 durationSeconds: Int(row["video_duration"] as? Int32 ?? 0),
-                date: Double(row["server_date"] as? String ?? "") ?? 0)
+                date: Double(row["server_date"] as? String ?? "") ?? 0,
+                isStarred: (row["is_stared"] as? String ?? "0") == "1",
+                canShare: MediaBrowserViewController.canShare(row: row))
         }
         for row in rows {
-            let messageId = row["message_id"] as? String ?? ""
-            let when = Double(row["server_date"] as? String ?? "") ?? 0
-            let text = row["message_text"] as? String ?? ""
             let file = row["file_id"] as? String ?? ""
             if !file.isEmpty {
-                let parts = text.components(separatedBy: "|")
-                browser.docs.append(MediaBrowserViewController.DocItem(messageId: messageId,
-                                                                       fileName: parts.first ?? file,
-                                                                       storedName: file,
-                                                                       detail: parts.count > 1 ? parts[1] : "",
-                                                                       date: when))
-            } else if let url = MediaBrowserViewController.firstLink(in: text) {
-                browser.links.append(MediaBrowserViewController.LinkItem(messageId: messageId,
-                                                                        url: url,
-                                                                        caption: text,
-                                                                        thumbFileName: row["thumb_id"] as? String ?? "",
-                                                                        date: when))
+                if let doc = MediaBrowserViewController.docItem(fromRow: row) {
+                    browser.docs.append(doc)
+                }
+            } else if let link = MediaBrowserViewController.linkItem(fromRow: row) {
+                browser.links.append(link)
             }
         }
         // Opened by the conversation itself, which is the screen underneath this one. A picture
@@ -1399,6 +1391,23 @@ extension GroupDetailViewController {
                 return
             }
             conversation.openMedia(messageId: messageId, from: browser, origin: browser.tileView(for: messageId))
+        }
+        // Fix: a document held in the browser offered only Share and Download from here - the
+        // group's conversation, underneath, was never asked to go to the message, star it, forward
+        // it or delete it. It does all four, the same way it does for a picture.
+        browser.onGoToMessage = { [weak browser] messageId in
+            conversation?.reveal(messageId: messageId, from: browser)
+        }
+        browser.onStar = { messageId in
+            conversation?.toggleStar(messageId: messageId)
+        }
+        browser.onForward = { [weak browser] ids in
+            guard let conversation = conversation else { return }
+            conversation.presentForwardChooser(for: ids.compactMap { conversation.messageForMedia(messageId: $0) }, from: browser)
+        }
+        browser.onDelete = { [weak browser] ids in
+            guard let conversation = conversation else { return }
+            conversation.presentDeleteOptions(for: ids.compactMap { conversation.messageForMedia(messageId: $0) }, from: browser)
         }
         navigationController?.pushViewController(browser, animated: true)
     }
@@ -1418,7 +1427,8 @@ extension GroupDetailViewController {
         var rows: [[String: Any?]] = []
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             let query = """
-                SELECT message_id, server_date, message_text, image_id, video_id, thumb_id, file_id, video_duration \
+                SELECT message_id, server_date, message_text, image_id, video_id, thumb_id, file_id, video_duration, \
+                is_stared, credential, attachment_speciality \
                 FROM MESSAGE where \(belongsTo) \
                 AND (lock IS NULL OR lock <> '1') AND (credential IS NULL OR credential <> '1') \
                 AND ((thumb_id IS NOT NULL AND thumb_id <> '') OR (file_id IS NOT NULL AND file_id <> '') \
@@ -1438,6 +1448,9 @@ extension GroupDetailViewController {
                 row["thumb_id"] = cursor.string(forColumnIndex: 5)
                 row["file_id"] = cursor.string(forColumnIndex: 6)
                 row["video_duration"] = cursor.int(forColumnIndex: 7)
+                row["is_stared"] = cursor.string(forColumnIndex: 8)
+                row["credential"] = cursor.string(forColumnIndex: 9)
+                row["attachment_speciality"] = cursor.string(forColumnIndex: 10)
                 rows.append(row)
             }
             cursor.close()

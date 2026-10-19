@@ -3526,7 +3526,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     }
     
     public func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-        return self.previewItem as QLPreviewItem
+        return OfficePreview.item(self.previewItem as QLPreviewItem)
     }
     
     public func tableView(_ tableView: UITableView, shouldHighlightRowAt indexPath: IndexPath) -> Bool {

@@ -9,6 +9,9 @@ import UIKit
 import ImageIO
 @_implementationOnly import Popover
 import QuickLook
+import QuickLookThumbnailing
+import PDFKit
+import WebKit
 import AVFoundation
 
 class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDelegate {
@@ -1049,13 +1052,19 @@ public final class MediaBrowserViewController: UIViewController {
         /// Read from the database, where it was written the first time anything had the file open.
         public let durationSeconds: Int
         public let date: Double
-        public init(messageId: String, thumbFileName: String, mediaFileName: String = "", isVideo: Bool, durationSeconds: Int = 0, date: Double) {
+        public var isStarred: Bool
+        /// Whether the picture or video may leave the app - see canShare(row:).
+        public let canShare: Bool
+        public init(messageId: String, thumbFileName: String, mediaFileName: String = "", isVideo: Bool, durationSeconds: Int = 0, date: Double,
+                    isStarred: Bool = false, canShare: Bool = false) {
             self.messageId = messageId
             self.thumbFileName = thumbFileName
             self.mediaFileName = mediaFileName
             self.isVideo = isVideo
             self.durationSeconds = durationSeconds
             self.date = date
+            self.isStarred = isStarred
+            self.canShare = canShare
         }
     }
 
@@ -1063,15 +1072,63 @@ public final class MediaBrowserViewController: UIViewController {
         public let messageId: String
         public let fileName: String
         public let storedName: String
+        /// What was written with the file - its caption. Searched, not shown in the row.
         public let detail: String
         public let date: Double
-        public init(messageId: String, fileName: String, storedName: String, detail: String, date: Double) {
+        public var isStarred: Bool
+        /// Whether the file may leave the app - see docItem(fromRow:).
+        public let canShare: Bool
+        /// What kind of file it is - "pdf", "xlsx" - or "" when neither its name nor its first bytes
+        /// say.
+        public let kind: String
+        public init(messageId: String, fileName: String, storedName: String, detail: String, date: Double,
+                    isStarred: Bool = false, canShare: Bool = false, kind: String? = nil) {
             self.messageId = messageId
             self.fileName = fileName
             self.storedName = storedName
             self.detail = detail
             self.date = date
+            self.isStarred = isStarred
+            self.canShare = canShare
+            self.kind = kind ?? Utils.documentExtension(of: fileName)
         }
+    }
+
+    /// A document row of the Docs tab, read off a message row: its name (the text before the
+    /// first bar), the stored file, the caption after the bar, whether it is starred, and whether
+    /// it may be shared - on the same terms the picture viewer offers Share.
+    public static func docItem(fromRow row: [String: Any?]) -> DocItem? {
+        let file = row["file_id"] as? String ?? ""
+        guard !file.isEmpty else {
+            return nil
+        }
+        let text = row["message_text"] as? String ?? ""
+        // Fix: the text before the first bar was taken as the name whether or not there was a bar.
+        // A document sent from elsewhere often carries only its caption, so the row was named after
+        // that sentence and had no extension at all ("*Fandi* dan *Sucipto* adalah ..." where the
+        // conversation shows "Activity user BIN.xlsx"). The name and the kind are read the way the
+        // conversation reads them - Utils.documentName / documentKind - so the two always agree.
+        let name = Utils.documentName(messageText: text, file: file)
+        let caption = text.contains("|")
+            ? text.components(separatedBy: "|").dropFirst().joined(separator: "|")
+            : text
+        return DocItem(messageId: row["message_id"] as? String ?? "",
+                       fileName: name,
+                       storedName: file,
+                       detail: caption,
+                       date: Double(row["server_date"] as? String ?? "") ?? 0,
+                       isStarred: (row["is_stared"] as? String ?? "0") == "1",
+                       canShare: canShare(row: row),
+                       kind: Utils.documentKind(named: name, file: file))
+    }
+
+    /// Whether a message's attachment may leave the app, on the terms the picture viewer offers
+    /// Share: never for a confidential message, otherwise where sharing is allowed for everyone or
+    /// for this attachment.
+    public static func canShare(row: [String: Any?]) -> Bool {
+        let speciality = row[TypeDataMessage.spec_file] as? String ?? row["attachment_speciality"] as? String ?? ""
+        return (row["credential"] as? String ?? "") != "1"
+            && (Nexilis.checkingAccess(key: "secure_folder_share") || speciality.contains("download") || speciality.contains("share"))
     }
 
     public struct LinkItem {
@@ -1080,13 +1137,42 @@ public final class MediaBrowserViewController: UIViewController {
         public let caption: String
         public let thumbFileName: String
         public let date: Double
-        public init(messageId: String, url: String, caption: String, thumbFileName: String, date: Double) {
+        public var isStarred: Bool
+        /// Whether the link may leave the app - not for a message sent as confidential.
+        public let canShare: Bool
+        /// The link as the conversation wrote it, which is what its unfurled title and picture are
+        /// kept under (LINK_PREVIEW) - not always the same text as `url`.
+        public let previewKey: String
+        public init(messageId: String, url: String, caption: String, thumbFileName: String, date: Double,
+                    isStarred: Bool = false, canShare: Bool = true, previewKey: String? = nil) {
             self.messageId = messageId
             self.url = url
             self.caption = caption
             self.thumbFileName = thumbFileName
             self.date = date
+            self.isStarred = isStarred
+            self.canShare = canShare
+            let written = previewKey ?? LinkPreviewFetcher.firstLink(in: caption)
+            self.previewKey = written.isEmpty ? url : written
         }
+    }
+
+    /// A row of the Links tab, read off a message row that carries a link and no file.
+    public static func linkItem(fromRow row: [String: Any?]) -> LinkItem? {
+        guard (row["file_id"] as? String ?? "").isEmpty else {
+            return nil
+        }
+        let text = row["message_text"] as? String ?? ""
+        guard let url = firstLink(in: text) else {
+            return nil
+        }
+        return LinkItem(messageId: row["message_id"] as? String ?? "",
+                        url: url,
+                        caption: text,
+                        thumbFileName: row["thumb_id"] as? String ?? "",
+                        date: Double(row["server_date"] as? String ?? "") ?? 0,
+                        isStarred: (row["is_stared"] as? String ?? "0") == "1",
+                        canShare: (row["credential"] as? String ?? "") != "1")
     }
 
     /// The first web address in a piece of text, if it holds one.
@@ -1111,6 +1197,20 @@ public final class MediaBrowserViewController: UIViewController {
     public var onGoToMessage: ((String) -> Void)?
     public var onForward: (([String]) -> Void)?
     public var onDelete: (([String]) -> Void)?
+    /// Stars or unstars one message - offered in a document's menu when the screen that opened
+    /// the browser can do it.
+    public var onStar: ((String) -> Void)?
+
+    /// Documents being downloaded from this screen, and how far along each is (0-100).
+    private var docDownloads: [String: Double] = [:]
+    /// What has been found out about each stored file: its size, and a PDF's page count.
+    private var docSizes: [String: Int64] = [:]
+    private var docPages: [String: Int] = [:]
+    private var askedDocFacts = Set<String>()
+    /// What has been read about each link's page (its title and picture), by preview key, and the
+    /// pages already asked for.
+    private var linkAnswers: [String: LinkPreviewStore.Answer] = [:]
+    private var askedLinkPages = Set<String>()
 
     private enum Tab: Int, Hashable {
         case media, links, docs
@@ -1142,7 +1242,7 @@ public final class MediaBrowserViewController: UIViewController {
     /// material, masked by a gradient that decides how far it reaches, and the strength set on the
     /// view's own alpha - alpha composites in proportion, where a part-transparent mask does not.
     /// It is this, not the glass on the controls, that lets white lettering sit over photographs.
-    private let headerScrim = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+    private let headerScrim = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
     private let headerScrimMask = CAGradientLayer()
     private static let headerScrimStrength: CGFloat = 0.6
     private let backButton = UIButton(type: .system)
@@ -1160,18 +1260,33 @@ public final class MediaBrowserViewController: UIViewController {
     private var shownLinks: [LinkItem] = []
     private let footer = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
     private let footerLabel = UILabel()
-    private let actionBar = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+    /// The month the grid is passing through, beside the scroll indicator while it moves - as in
+    /// WhatsApp and Photos.
+    private let monthPill = UIView()
+    private let monthPillLabel = UILabel()
+    private var monthPillHide: DispatchWorkItem?
+    /// The buttons along the bottom while choosing - each on its own glass, as in WhatsApp.
+    private let actionBar = UIView()
+    private let forwardButton = UIButton(type: .system)
+    private let starButton = UIButton(type: .system)
+    private let shareButton = UIButton(type: .system)
+    private let deleteButton = UIButton(type: .system)
+    private var forwardHolder: UIView?
+    private var footerTop: NSLayoutConstraint?
+    private var backGlass: UIView?
+    private var segmentsBesideBack: NSLayoutConstraint?
+    private var segmentsCentred: NSLayoutConstraint?
+    private var selectSquare: NSLayoutConstraint?
 
     /// Rows of one list, cut into the months they were sent in.
     private var sections: [(title: String, rows: [Int])] = []
 
     public override func viewDidLoad() {
         super.viewDidLoad()
-        // Dark like the picture viewer it is opened from, rather than following the app: the
-        // header is meant to read as the same transparent, blurred strip, and a light strip over
-        // a grid of photographs is not that.
-        overrideUserInterfaceStyle = .dark
-        view.backgroundColor = .black
+        // Fix: the screen was held dark whatever the phone was set to. WhatsApp follows it - white
+        // in light mode, black in dark, with the text, the month strips and the cards to match - so
+        // every colour here is one that answers to the mode (BrowserPalette).
+        view.backgroundColor = .systemBackground
         navigationController?.setNavigationBarHidden(true, animated: false)
         buildGrid()
         buildList()
@@ -1303,19 +1418,20 @@ public final class MediaBrowserViewController: UIViewController {
         backStyle.image = UIImage(systemName: "chevron.left", withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold))
         backStyle.contentInsets = .zero
         backButton.configuration = backStyle
-        backButton.tintColor = .white
+        backButton.tintColor = .label
         backButton.addTarget(self, action: #selector(tapBack), for: .touchUpInside)
         backButton.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(backButton)
-        glass(behind: backButton, radius: 22)
+        backGlass = glass(behind: backButton, radius: 22)
 
         segments.selectedSegmentIndex = 0
         segments.backgroundColor = .clear
-        segments.selectedSegmentTintColor = UIColor(white: 1, alpha: 0.22)
+        segments.selectedSegmentTintColor = BrowserPalette.selectedSegment
         // `.semibold` is remapped by the app onto a bold-italic face - which is where the slanted
         // "Media" came from. Plain bold is upright.
-        segments.setTitleTextAttributes([.font: UIFont.systemFont(ofSize: 15), .foregroundColor: UIColor(white: 1, alpha: 0.65)], for: .normal)
-        segments.setTitleTextAttributes([.font: UIFont.boldSystemFont(ofSize: 15), .foregroundColor: UIColor.white], for: .selected)
+        segments.setTitleTextAttributes([.font: UIFont.systemFont(ofSize: 15), .foregroundColor: UIColor.label.withAlphaComponent(0.7)], for: .normal)
+        // The chosen tab is told by its glass and its full colour, not by weight - as in WhatsApp.
+        segments.setTitleTextAttributes([.font: UIFont.systemFont(ofSize: 15), .foregroundColor: UIColor.label], for: .selected)
         segments.setContentHuggingPriority(.required, for: .horizontal)
         segments.addTarget(self, action: #selector(changeTab), for: .valueChanged)
         segments.translatesAutoresizingMaskIntoConstraints = false
@@ -1347,12 +1463,16 @@ public final class MediaBrowserViewController: UIViewController {
 
             // Sized by what is written in it and set beside the back button, not stretched across
             // the gap - the reference leaves empty space between the tabs and Select.
-            segments.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: 8),
             segments.trailingAnchor.constraint(lessThanOrEqualTo: selectButton.leadingAnchor, constant: -8),
             segments.centerYAnchor.constraint(equalTo: backButton.centerYAnchor),
             segments.heightAnchor.constraint(equalToConstant: 44)
         ])
-
+        // Beside the back button normally; while choosing there is no back button, and the tabs
+        // stand in the middle with a round X at the end, as in WhatsApp.
+        segmentsBesideBack = segments.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: 8)
+        segmentsCentred = segments.centerXAnchor.constraint(equalTo: header.centerXAnchor)
+        selectSquare = selectButton.widthAnchor.constraint(equalToConstant: 44)
+        segmentsBesideBack?.isActive = true
     }
 
     private let searchBarHeight: CGFloat = 44
@@ -1368,9 +1488,9 @@ public final class MediaBrowserViewController: UIViewController {
         searchBar.placeholder = "Search".localized()
         searchBar.searchBarStyle = .minimal
         searchBar.delegate = self
-        searchBar.tintColor = .white
-        searchBar.searchTextField.textColor = .white
-        searchBar.searchTextField.backgroundColor = UIColor(white: 1, alpha: 0.1)
+        searchBar.tintColor = .label
+        searchBar.searchTextField.textColor = .label
+        searchBar.searchTextField.backgroundColor = .tertiarySystemFill
         searchBar.translatesAutoresizingMaskIntoConstraints = false
 
         let carrier = UIView()
@@ -1393,12 +1513,13 @@ public final class MediaBrowserViewController: UIViewController {
     /// On iOS 26 that is the real thing - clear glass, which is what the reference is showing.
     /// Before that there is no glass, so the thinnest material stands in for it. What keeps white
     /// lettering readable is not these panes but the scrim behind the whole row.
-    private func glass(behind control: UIView, radius: CGFloat) {
+    @discardableResult
+    private func glass(behind control: UIView, radius: CGFloat) -> UIView {
         let pane: UIVisualEffectView
         if #available(iOS 26.0, *) {
             pane = UIVisualEffectView(effect: UIGlassEffect(style: .clear))
         } else {
-            pane = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+            pane = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
         }
         pane.isUserInteractionEnabled = false
         pane.layer.cornerRadius = radius
@@ -1412,49 +1533,102 @@ public final class MediaBrowserViewController: UIViewController {
             pane.trailingAnchor.constraint(equalTo: control.trailingAnchor),
             pane.bottomAnchor.constraint(equalTo: control.bottomAnchor)
         ])
+        return pane
     }
 
     private func buildFooter() {
+        // On iOS 26 the count stands on the pictures with nothing behind it, as WhatsApp's does;
+        // before that it keeps its blurred strip, which is how that system reads.
+        if #available(iOS 26.0, *) {
+            footer.effect = nil
+            footer.backgroundColor = .clear
+        }
         footer.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(footer)
-        footerLabel.font = .systemFont(ofSize: 13)
-        footerLabel.textColor = .secondaryLabel
+        footerLabel.font = .systemFont(ofSize: 17)
+        footerLabel.textColor = .label
         footerLabel.textAlignment = .center
         footerLabel.translatesAutoresizingMaskIntoConstraints = false
         footer.contentView.addSubview(footerLabel)
 
+        // WhatsApp's bar while choosing: round glass buttons spread across the bottom - Share,
+        // Star and Delete under Media; Forward, Star, Share and Delete under Links and Docs - shown
+        // as soon as choosing starts and greyed until something is chosen.
+        monthPill.isUserInteractionEnabled = false
+        monthPill.alpha = 0
+        monthPill.layer.cornerRadius = 14
+        monthPill.layer.cornerCurve = .continuous
+        monthPill.clipsToBounds = true
+        let pillGround: UIVisualEffectView
+        if #available(iOS 26.0, *) {
+            pillGround = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+        } else {
+            pillGround = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+        }
+        pillGround.frame = monthPill.bounds
+        pillGround.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        monthPill.addSubview(pillGround)
+        monthPillLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        monthPillLabel.textColor = .label
+        monthPillLabel.textAlignment = .center
+        monthPillLabel.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        monthPill.addSubview(monthPillLabel)
+        view.addSubview(monthPill)
+
         actionBar.translatesAutoresizingMaskIntoConstraints = false
+        actionBar.backgroundColor = .clear
         actionBar.isHidden = true
         view.addSubview(actionBar)
-        let forward = UIButton(type: .system)
-        forward.setImage(UIImage(systemName: "arrowshape.turn.up.right"), for: .normal)
-        forward.tintColor = .label
-        forward.addTarget(self, action: #selector(tapForward), for: .touchUpInside)
-        let bin = UIButton(type: .system)
-        bin.setImage(UIImage(systemName: "trash"), for: .normal)
-        bin.tintColor = .systemRed
-        bin.addTarget(self, action: #selector(tapDelete), for: .touchUpInside)
-        let bar = UIStackView(arrangedSubviews: [forward, bin])
-        bar.distribution = .fillEqually
+        let symbols: [(UIButton, String, Selector)] = [
+            (forwardButton, "arrowshape.turn.up.right", #selector(tapForward)),
+            (starButton, "star", #selector(tapStarPicked)),
+            (shareButton, "square.and.arrow.up", #selector(tapSharePicked)),
+            (deleteButton, "trash", #selector(tapDelete))
+        ]
+        var holders: [UIView] = []
+        for (button, symbol, action) in symbols {
+            button.setImage(UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .regular)), for: .normal)
+            button.tintColor = .label
+            button.addTarget(self, action: action, for: .touchUpInside)
+            button.translatesAutoresizingMaskIntoConstraints = false
+            let holder = UIView()
+            holder.translatesAutoresizingMaskIntoConstraints = false
+            holder.addSubview(button)
+            NSLayoutConstraint.activate([
+                holder.widthAnchor.constraint(equalToConstant: 48),
+                holder.heightAnchor.constraint(equalToConstant: 48),
+                button.topAnchor.constraint(equalTo: holder.topAnchor),
+                button.bottomAnchor.constraint(equalTo: holder.bottomAnchor),
+                button.leadingAnchor.constraint(equalTo: holder.leadingAnchor),
+                button.trailingAnchor.constraint(equalTo: holder.trailingAnchor)
+            ])
+            glass(behind: button, radius: 24)
+            holders.append(holder)
+        }
+        forwardHolder = holders.first
+        let bar = UIStackView(arrangedSubviews: holders)
+        bar.axis = .horizontal
+        bar.distribution = .equalSpacing
+        bar.alignment = .center
         bar.translatesAutoresizingMaskIntoConstraints = false
-        actionBar.contentView.addSubview(bar)
+        actionBar.addSubview(bar)
 
+        footerTop = footer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -44)
         NSLayoutConstraint.activate([
             footer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             footer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             footer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            footer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -44),
+            footerTop!,
             footerLabel.centerXAnchor.constraint(equalTo: footer.contentView.centerXAnchor),
             footerLabel.topAnchor.constraint(equalTo: footer.contentView.topAnchor, constant: 14),
 
             actionBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             actionBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            actionBar.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            actionBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -50),
-            bar.leadingAnchor.constraint(equalTo: actionBar.contentView.leadingAnchor, constant: 40),
-            bar.trailingAnchor.constraint(equalTo: actionBar.contentView.trailingAnchor, constant: -40),
-            bar.topAnchor.constraint(equalTo: actionBar.contentView.topAnchor, constant: 8),
-            bar.heightAnchor.constraint(equalToConstant: 34)
+            actionBar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -2),
+            actionBar.heightAnchor.constraint(equalToConstant: 56),
+            bar.leadingAnchor.constraint(equalTo: actionBar.leadingAnchor, constant: 24),
+            bar.trailingAnchor.constraint(equalTo: actionBar.trailingAnchor, constant: -24),
+            bar.centerYAnchor.constraint(equalTo: actionBar.centerYAnchor)
         ])
     }
 
@@ -1465,8 +1639,11 @@ public final class MediaBrowserViewController: UIViewController {
         let side = floor((UIScreen.main.bounds.width - 6) / 4)
         layout.itemSize = CGSize(width: side, height: side)
         layout.sectionInset = .zero
+        // Fix: the count of photos and videos was pinned to the bottom of the screen; WhatsApp's is
+        // the grid's own last line, under the last pictures, and scrolls with them.
+        layout.footerReferenceSize = CGSize(width: UIScreen.main.bounds.width, height: 64)
         grid = UICollectionView(frame: .zero, collectionViewLayout: layout)
-        grid.backgroundColor = .black
+        grid.backgroundColor = .systemBackground
         grid.dataSource = self
         grid.delegate = self
         // The inset is measured from the chrome, which already sits below the safe area. Left on
@@ -1474,6 +1651,8 @@ public final class MediaBrowserViewController: UIViewController {
         // black that kept appearing above the search field however the inset was worked out.
         grid.contentInsetAdjustmentBehavior = .never
         grid.register(MediaTileCell.self, forCellWithReuseIdentifier: "tile")
+        grid.register(GridCountFooter.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionFooter,
+                      withReuseIdentifier: "count")
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
         NSLayoutConstraint.activate([
@@ -1488,11 +1667,12 @@ public final class MediaBrowserViewController: UIViewController {
         list.dataSource = self
         list.delegate = self
         list.contentInsetAdjustmentBehavior = .never
-        list.backgroundColor = .black
+        list.backgroundColor = .systemBackground
         list.separatorStyle = .none
         list.sectionHeaderTopPadding = 0
         list.keyboardDismissMode = .onDrag
         list.register(AttachmentRowCell.self, forCellReuseIdentifier: "row")
+        list.register(LinkCardCell.self, forCellReuseIdentifier: "link")
         list.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(list)
         NSLayoutConstraint.activate([
@@ -1518,8 +1698,9 @@ public final class MediaBrowserViewController: UIViewController {
         picked.removeAll()
         refreshSelectionChrome()
         grid.isHidden = next != .media
+        monthPillHide?.cancel()
+        monthPill.alpha = 0
         list.isHidden = next == .media
-        footer.isHidden = next != .media || isSelecting
 
 
         switch next {
@@ -1539,8 +1720,8 @@ public final class MediaBrowserViewController: UIViewController {
     /// search height - which drifted from where the views really were, leaving the first heading
     /// stranded a long way below the search field. Reading the frames cannot drift.
     private func refreshInsets() {
-        setTop(header.frame.maxY + 8, on: grid, bottom: view.safeAreaInsets.bottom + 60)
-        setTop(header.frame.maxY + 11, on: list, bottom: view.safeAreaInsets.bottom + 24)
+        setTop(header.frame.maxY + 8, on: grid, bottom: view.safeAreaInsets.bottom + (isSelecting ? 64 : 0))
+        setTop(header.frame.maxY + 11, on: list, bottom: view.safeAreaInsets.bottom + (isSelecting ? 76 : 24))
 
         // A table header view is laid out from its frame, not its constraints, so it is given one.
         // The tail below the field is the gap before the first month heading.
@@ -1555,12 +1736,12 @@ public final class MediaBrowserViewController: UIViewController {
     }
 
     private func setTop(_ top: CGFloat, on scroller: UIScrollView, bottom: CGFloat) {
-        guard top > 0, abs(scroller.contentInset.top - top) > 0.5 else {
+        guard top > 0, abs(scroller.contentInset.top - top) > 0.5 || abs(scroller.contentInset.bottom - bottom) > 0.5 else {
             return
         }
         // A list sitting at its top should stay there rather than be left showing a gap where the
         // inset used to be.
-        let wasAtTop = scroller.contentOffset.y <= -scroller.contentInset.top + 1
+        let wasAtTop = abs(scroller.contentInset.top - top) > 0.5 && scroller.contentOffset.y <= -scroller.contentInset.top + 1
         scroller.contentInset = UIEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
         scroller.scrollIndicatorInsets = scroller.contentInset
         if wasAtTop {
@@ -1578,8 +1759,16 @@ public final class MediaBrowserViewController: UIViewController {
             sections = Self.groupByMonth(count: shownDocs.count) { self.shownDocs[$0].date }
             list.tableFooterView = countFooter(shownDocs.count, one: "Document".localized(), many: "Documents".localized())
         } else {
-            shownLinks = needle.isEmpty ? links : links.filter {
-                $0.url.lowercased().contains(needle) || $0.caption.lowercased().contains(needle)
+            shownLinks = needle.isEmpty ? links : links.filter { item in
+                if item.url.lowercased().contains(needle) || LinkCardCell.caption(of: item).lowercased().contains(needle) {
+                    return true
+                }
+                // What the card shows of the page is searched too, as WhatsApp searches it.
+                guard let facts = storedFacts(for: item) else {
+                    return false
+                }
+                return facts.title.lowercased().contains(needle) || facts.blurb.lowercased().contains(needle)
+                    || facts.domain.contains(needle)
             }
             sections = Self.groupByMonth(count: shownLinks.count) { self.shownLinks[$0].date }
             list.tableFooterView = countFooter(shownLinks.count, one: "Link".localized(), many: "Links".localized())
@@ -1642,25 +1831,196 @@ public final class MediaBrowserViewController: UIViewController {
     @objc private func tapSelect() {
         isSelecting.toggle()
         picked.removeAll()
+        refreshSelectionChrome(animated: true)
+        // The rows on screen slide over to make room for the circles, rather than being rebuilt in
+        // one jump - WhatsApp's way. The rest pick the state up as they are drawn.
+        if currentTab == .media {
+            grid.reloadData()
+        } else {
+            for cell in list.visibleCells {
+                (cell as? AttachmentRowCell)?.setSelecting(isSelecting, picked: false, animated: true)
+                (cell as? LinkCardCell)?.setSelecting(isSelecting, picked: false, animated: true)
+            }
+        }
+    }
+
+    /// One spring for everything that moves when choosing starts or ends, so the header, the rows
+    /// and the bar move as one.
+    static func selectionMotion(_ changes: @escaping () -> Void, completion: ((Bool) -> Void)? = nil) {
+        UIView.animate(withDuration: 0.38, delay: 0, usingSpringWithDamping: 1, initialSpringVelocity: 0,
+                       options: [.beginFromCurrentState, .allowUserInteraction], animations: changes, completion: completion)
+    }
+
+    /// Keeps the button hugging its own words, whichever of the two it is showing.
+    /// "Select", and while choosing a round X on the same glass - WhatsApp's Cancel.
+    private func applySelectTitle() {
+        var style = UIButton.Configuration.plain()
+        if isSelecting {
+            style.image = UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .medium))
+            style.contentInsets = .zero
+        } else {
+            style.attributedTitle = AttributedString("Select".localized(),
+                                                     attributes: AttributeContainer([.font: UIFont.systemFont(ofSize: 15),
+                                                                                     .foregroundColor: UIColor.label]))
+            style.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 14)
+        }
+        selectButton.configuration = style
+        selectButton.tintColor = .label
+        selectButton.accessibilityLabel = isSelecting ? "Cancel".localized() : "Select".localized()
+    }
+
+    private func refreshSelectionChrome(animated: Bool = false) {
+        if animated {
+            UIView.transition(with: selectButton, duration: 0.25, options: [.transitionCrossDissolve, .allowUserInteraction],
+                              animations: { self.applySelectTitle() })
+        } else {
+            applySelectTitle()
+        }
+        let selecting = isSelecting
+        // Faded rather than snapped: the back button out, the bar in, the search field dimmed -
+        // it cannot be used while choosing.
+        if selecting {
+            searchBar.resignFirstResponder()
+        }
+        searchBar.isUserInteractionEnabled = !selecting
+        let showBack = !selecting
+        let showBar = selecting
+        if animated {
+            if showBack {
+                backButton.isHidden = false
+                backGlass?.isHidden = false
+            }
+            if showBar {
+                actionBar.isHidden = false
+            }
+        } else {
+            backButton.isHidden = !showBack
+            backGlass?.isHidden = !showBack
+            actionBar.isHidden = !showBar
+        }
+        selectSquare?.isActive = isSelecting
+        if isSelecting {
+            segmentsBesideBack?.isActive = false
+            segmentsCentred?.isActive = true
+        } else {
+            segmentsCentred?.isActive = false
+            segmentsBesideBack?.isActive = true
+        }
+
+        actionBar.isHidden = !isSelecting
+        forwardHolder?.isHidden = currentTab == .media
+        let chosen = pickedItems()
+        let any = !chosen.ids.isEmpty
+        forwardButton.isEnabled = any && onForward != nil
+        starButton.isEnabled = any && onStar != nil
+        shareButton.isEnabled = any && chosen.shareable
+        deleteButton.isEnabled = any && onDelete != nil
+        deleteButton.tintColor = deleteButton.isEnabled ? .systemRed : .label
+        let allStarred = any && chosen.allStarred
+        starButton.setImage(UIImage(systemName: allStarred ? "star.slash" : "star",
+                                    withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .regular)), for: .normal)
+
+        // The count is part of the grid now (GridCountFooter); the strip that carried it stays away.
+        footer.isHidden = true
+        let changes = {
+            self.backButton.alpha = showBack ? 1 : 0
+            self.backGlass?.alpha = showBack ? 1 : 0
+            self.actionBar.alpha = showBar ? 1 : 0
+            self.searchBar.alpha = selecting ? 0.45 : 1
+            self.view.layoutIfNeeded()
+        }
+        if animated {
+            Self.selectionMotion(changes) { _ in
+                // Settled: what faded out is taken away, unless choosing was turned back meanwhile.
+                guard self.isSelecting == selecting else { return }
+                self.backButton.isHidden = !showBack
+                self.backGlass?.isHidden = !showBack
+                self.actionBar.isHidden = !showBar
+            }
+        } else {
+            UIView.performWithoutAnimation(changes)
+        }
+        refreshInsets()
+    }
+
+    /// What is chosen on the tab being shown: the messages, whether every one of them is starred,
+    /// and whether every one may be shared.
+    private func pickedItems() -> (ids: [String], allStarred: Bool, shareable: Bool) {
+        switch currentTab {
+        case .media:
+            let items = media.filter { picked.contains($0.messageId) }
+            return (items.map { $0.messageId }, items.allSatisfy { $0.isStarred }, items.allSatisfy { $0.canShare })
+        case .links:
+            let items = links.filter { picked.contains($0.messageId) }
+            return (items.map { $0.messageId }, items.allSatisfy { $0.isStarred }, items.allSatisfy { $0.canShare })
+        case .docs:
+            let items = docs.filter { picked.contains($0.messageId) }
+            return (items.map { $0.messageId }, items.allSatisfy { $0.isStarred }, items.allSatisfy { $0.canShare })
+        }
+    }
+
+    /// Stars everything chosen - or, when all of it already is, unstars it, as WhatsApp does.
+    @objc private func tapStarPicked() {
+        guard let star = onStar else {
+            return
+        }
+        let chosen = pickedItems()
+        let target = !chosen.allStarred
+        for id in chosen.ids {
+            let current: Bool
+            if let item = media.first(where: { $0.messageId == id }) {
+                current = item.isStarred
+            } else if let item = links.first(where: { $0.messageId == id }) {
+                current = item.isStarred
+            } else {
+                current = docs.first(where: { $0.messageId == id })?.isStarred ?? false
+            }
+            if current != target {
+                star(id)
+                setStarred(target, messageId: id)
+            }
+        }
+        view.presentToast((target ? "Starred" : "Unstarred").localized())
+        isSelecting = false
+        picked.removeAll()
         refreshSelectionChrome()
         reloadCurrent()
     }
 
-    /// Keeps the button hugging its own words, whichever of the two it is showing.
-    private func applySelectTitle() {
-        var style = UIButton.Configuration.plain()
-        style.attributedTitle = AttributedString(isSelecting ? "Cancel".localized() : "Select".localized(),
-                                                 attributes: AttributeContainer([.font: UIFont.systemFont(ofSize: 15),
-                                                                                 .foregroundColor: UIColor.white]))
-        style.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 14)
-        selectButton.configuration = style
-        selectButton.tintColor = .white
-    }
-
-    private func refreshSelectionChrome() {
-        applySelectTitle()
-        actionBar.isHidden = !isSelecting || picked.isEmpty
-        footer.isHidden = currentTab != .media || isSelecting
+    /// The share sheet for everything chosen: the files of pictures, videos and documents (those
+    /// on the device), or the addresses of links.
+    @objc private func tapSharePicked() {
+        let chosen = pickedItems()
+        guard !chosen.ids.isEmpty, chosen.shareable else {
+            return
+        }
+        var things: [Any] = []
+        switch currentTab {
+        case .media:
+            for item in media where picked.contains(item.messageId) {
+                if let url = readableURL(storedName: item.mediaFileName, named: item.mediaFileName, kind: "") {
+                    things.append(url)
+                }
+            }
+        case .links:
+            for item in links where picked.contains(item.messageId) {
+                things.append(URL(string: item.url) ?? item.url)
+            }
+        case .docs:
+            for item in docs where picked.contains(item.messageId) {
+                if let url = readableURL(for: item) {
+                    things.append(url)
+                }
+            }
+        }
+        guard !things.isEmpty else {
+            view.presentToast("Download the files first to share them.".localized())
+            return
+        }
+        let sheet = UIActivityViewController(activityItems: things, applicationActivities: nil)
+        sheet.popoverPresentationController?.sourceView = shareButton
+        sheet.popoverPresentationController?.sourceRect = shareButton.bounds
+        present(sheet, animated: true)
     }
 
     private func reloadCurrent() {
@@ -1728,11 +2088,94 @@ extension MediaBrowserViewController: QLPreviewControllerDataSource {
     }
 
     public func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-        return previewURL!
+        return OfficePreview.item(previewURL!)
     }
 }
 
 extension MediaBrowserViewController: UICollectionViewDataSource, UICollectionViewDelegate {
+
+    public func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String,
+                               at indexPath: IndexPath) -> UICollectionReusableView {
+        let footer = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "count", for: indexPath)
+        (footer as? GridCountFooter)?.label.text = mediaSummary()
+        return footer
+    }
+
+    // MARK: Month beside the scroll indicator
+
+    public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard scrollView === grid, scrollView.isDragging || scrollView.isDecelerating else {
+            return
+        }
+        placeMonthPill()
+    }
+
+    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if scrollView === grid, !decelerate {
+            hideMonthPillSoon()
+        }
+    }
+
+    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        if scrollView === grid {
+            hideMonthPillSoon()
+        }
+    }
+
+    /// Puts the month beside where the scroll indicator is, naming the pictures level with it.
+    private func placeMonthPill() {
+        let insets = grid.adjustedContentInset
+        let visible = grid.bounds.height - insets.top - insets.bottom
+        let travel = grid.contentSize.height - visible
+        guard visible > 0, travel > 40, !media.isEmpty else {
+            return
+        }
+        let progress = min(1, max(0, (grid.contentOffset.y + insets.top) / travel))
+        let pillHeight: CGFloat = 28
+        let top = grid.frame.minY + insets.top + 6
+        let bottom = grid.frame.minY + insets.top + visible - pillHeight - 6
+        let y = top + (bottom - top) * progress
+
+        // The pictures level with the pill, in the grid's own coordinates.
+        let level = grid.contentOffset.y + (y - grid.frame.minY) + pillHeight / 2
+        var found: IndexPath?
+        for x in stride(from: grid.bounds.width - 10, through: 10, by: -grid.bounds.width / 4) {
+            if let indexPath = grid.indexPathForItem(at: CGPoint(x: x, y: level)) {
+                found = indexPath
+                break
+            }
+        }
+        if found == nil {
+            found = grid.indexPathsForVisibleItems.min(by: {
+                abs((grid.layoutAttributesForItem(at: $0)?.frame.midY ?? 0) - level)
+                    < abs((grid.layoutAttributesForItem(at: $1)?.frame.midY ?? 0) - level)
+            })
+        }
+        guard let item = found?.item, item < media.count, media[item].date > 0 else {
+            return
+        }
+        let stamp = Date(timeIntervalSince1970: media[item].date / 1000)
+        monthPillLabel.text = DateFormatterPool.shared.string(from: stamp, format: "MMM yyyy")
+        let width = ceil(monthPillLabel.intrinsicContentSize.width) + 24
+        monthPill.frame = CGRect(x: view.bounds.width - width - 14, y: y, width: width, height: pillHeight)
+        monthPillHide?.cancel()
+        if monthPill.alpha < 1 {
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+                self.monthPill.alpha = 1
+            }
+        }
+    }
+
+    private func hideMonthPillSoon() {
+        monthPillHide?.cancel()
+        let hide = DispatchWorkItem { [weak self] in
+            UIView.animate(withDuration: 0.35, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+                self?.monthPill.alpha = 0
+            }
+        }
+        monthPillHide = hide
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: hide)
+    }
 
     public func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         return media.count
@@ -1826,7 +2269,7 @@ extension MediaBrowserViewController: UITableViewDataSource, UITableViewDelegate
 
     public func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
         let strip = UIView()
-        strip.backgroundColor = UIColor(white: 0.1, alpha: 1)
+        strip.backgroundColor = BrowserPalette.monthStrip
         let label = UILabel()
         label.text = sections[section].title
         label.font = .systemFont(ofSize: 13)
@@ -1845,15 +2288,22 @@ extension MediaBrowserViewController: UITableViewDataSource, UITableViewDelegate
     }
 
     public func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "row", for: indexPath) as! AttachmentRowCell
         let index = sections[indexPath.section].rows[indexPath.row]
         if currentTab == .docs {
+            let cell = tableView.dequeueReusableCell(withIdentifier: "row", for: indexPath) as! AttachmentRowCell
             let doc = shownDocs[index]
-            cell.showDoc(doc, selecting: isSelecting, picked: picked.contains(doc.messageId))
-        } else {
-            let link = shownLinks[index]
-            cell.showLink(link, selecting: isSelecting, picked: picked.contains(link.messageId))
+            let line = docLine(for: doc)
+            cell.showDoc(doc, line: line.text, downloadFraction: line.fraction, isHere: line.isHere,
+                         selecting: isSelecting, picked: picked.contains(doc.messageId))
+            return cell
         }
+        let cell = tableView.dequeueReusableCell(withIdentifier: "link", for: indexPath) as! LinkCardCell
+        let link = shownLinks[index]
+        cell.onViewMessage = onGoToMessage == nil ? nil : { [weak self] in
+            self?.onGoToMessage?(link.messageId)
+        }
+        cell.show(link, facts: pageFacts(for: link), query: searchText.trimmingCharacters(in: .whitespaces),
+                  selecting: isSelecting, picked: picked.contains(link.messageId))
         return cell
     }
 
@@ -1869,10 +2319,102 @@ extension MediaBrowserViewController: UITableViewDataSource, UITableViewDelegate
         // A row here is the thing itself, not a pointer at the conversation: a link opens, a
         // document opens. Reaching the message it came from is what "Go to Message" is for.
         if currentTab == .docs {
-            open(shownDocs[index])
-        } else if let url = URL(string: shownLinks[index].url) {
-            UIApplication.shared.open(url)
+            let doc = shownDocs[index]
+            if isHere(doc) {
+                open(doc)
+            } else if docDownloads[doc.messageId] == nil {
+                // Not on the device yet: fetched here, the row counting up as it comes, and opened
+                // the moment it is in - as WhatsApp does.
+                downloadDoc(doc) { [weak self] in
+                    guard let self = self, self.viewIfLoaded?.window != nil, self.presentedViewController == nil else {
+                        return
+                    }
+                    self.open(doc)
+                }
+            }
+        } else {
+            openLink(shownLinks[index])
         }
+    }
+
+    // MARK: - Links
+
+    /// Opens a link exactly as tapping it in the conversation does (LinkOpener): a well-known
+    /// app's link straight into that app, anything else in the secure browser where the
+    /// secure_browser access is on, and in Safari otherwise.
+    ///
+    /// Fix: this handed every link to Safari, past the secure browser the conversation keeps
+    /// them in.
+    private func openLink(_ item: LinkItem) {
+        LinkOpener.open(urlString: item.previewKey)
+    }
+
+    /// What is known of the page behind a link - its title and picture, as the conversation's
+    /// card shows them. A page never read before is read once, and its rows redrawn when it is in.
+    private func pageFacts(for item: LinkItem) -> LinkPreviewFacts? {
+        let key = item.previewKey
+        let answer: LinkPreviewStore.Answer
+        if let known = linkAnswers[key] {
+            answer = known
+        } else {
+            answer = LinkPreviewStore.answer(link: key)
+            linkAnswers[key] = answer
+        }
+        switch answer {
+        case .read(let facts):
+            return facts
+        case .nothingOnIt:
+            return nil
+        case .notAsked:
+            if askedLinkPages.insert(key).inserted {
+                LinkPreviewFetcher.fetch(link: key) { [weak self] gained in
+                    guard let self = self, gained else { return }
+                    self.linkAnswers[key] = nil
+                    self.refreshLinkRows(previewKey: key)
+                }
+            }
+            return nil
+        }
+    }
+
+    /// What the device already holds about a link's page, without asking the network.
+    private func storedFacts(for item: LinkItem) -> LinkPreviewFacts? {
+        let key = item.previewKey
+        if linkAnswers[key] == nil {
+            linkAnswers[key] = LinkPreviewStore.answer(link: key)
+        }
+        if case .read(let facts) = linkAnswers[key] {
+            return facts
+        }
+        return nil
+    }
+
+    /// Redraws the visible rows of one link once its page has been read.
+    private func refreshLinkRows(previewKey: String) {
+        guard currentTab == .links else {
+            return
+        }
+        var rows: [IndexPath] = []
+        for indexPath in list.indexPathsForVisibleRows ?? [] {
+            guard indexPath.section < sections.count, indexPath.row < sections[indexPath.section].rows.count else {
+                continue
+            }
+            let index = sections[indexPath.section].rows[indexPath.row]
+            if index < shownLinks.count, shownLinks[index].previewKey == previewKey {
+                rows.append(indexPath)
+            }
+        }
+        if !rows.isEmpty {
+            list.reloadRows(at: rows, with: .none)
+        }
+    }
+
+    private func shareLink(_ item: LinkItem) {
+        let shared: Any = URL(string: item.url) ?? item.url
+        let sheet = UIActivityViewController(activityItems: [shared], applicationActivities: nil)
+        sheet.popoverPresentationController?.sourceView = view
+        sheet.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+        present(sheet, animated: true)
     }
 
     /// Opens a document the conversation is holding, wherever the file is kept.
@@ -1885,31 +2427,202 @@ extension MediaBrowserViewController: UITableViewDataSource, UITableViewDelegate
         guard !item.storedName.isEmpty else {
             return
         }
-        let plain = URL(fileURLWithPath: NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0])
-            .appendingPathComponent(item.storedName)
-        if FileManager.default.fileExists(atPath: plain.path) {
-            preview(plain)
+        if let url = readableURL(for: item) {
+            preview(url)
             return
         }
-        if FileEncryption.shared.isSecureExists(filename: item.storedName) {
-            do {
-                if var data = try FileEncryption.shared.readSecure(filename: item.storedName) {
-                    if let plainData = FileEncryption.shared.decryptFileFromServer(data: data) {
-                        data = plainData
-                    }
-                    // Quick Look reads from disk, and what is in the secure store cannot be handed
-                    // to it as it stands, so a readable copy is left in caches for it.
-                    let temporary = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-                        .appendingPathComponent(item.storedName)
-                    try data.write(to: temporary)
-                    preview(temporary)
-                    return
+        if !isHere(item) {
+            onGoToMessage?(item.messageId)
+        }
+    }
+
+    /// A file Quick Look, the share sheet or a preview can read: the plain copy where there is
+    /// one, otherwise the secure copy decrypted into caches. Nil when the file is not here.
+    private func readableURL(for item: DocItem) -> URL? {
+        return readableURL(storedName: item.storedName, named: item.fileName, kind: item.kind)
+    }
+
+    private func readableURL(storedName: String, named fileName: String, kind: String) -> URL? {
+        guard !storedName.isEmpty else {
+            return nil
+        }
+        let plain = URL(fileURLWithPath: NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0])
+            .appendingPathComponent(storedName)
+        if FileManager.default.fileExists(atPath: plain.path) {
+            return plain
+        }
+        guard FileEncryption.shared.isSecureExists(filename: storedName),
+              var data = try? FileEncryption.shared.readSecure(filename: storedName) else {
+            return nil
+        }
+        if let plainData = FileEncryption.shared.decryptFileFromServer(data: data) {
+            data = plainData
+        }
+        // Quick Look reads from disk, and what is in the secure store cannot be handed to it as it
+        // stands, so a readable copy is left in caches for it - under the name the reader knows.
+        let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("docs-open", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var named = (fileName as NSString).lastPathComponent
+        if named.isEmpty {
+            named = storedName
+        }
+        // Quick Look decides how to draw a file by its extension, so a name that does not carry one
+        // gets the kind the file itself says it is.
+        if Utils.documentExtension(of: named).isEmpty, !kind.isEmpty {
+            named += "." + kind
+        }
+        let temporary = folder.appendingPathComponent(named)
+        guard (try? data.write(to: temporary, options: .atomic)) != nil else {
+            return nil
+        }
+        return temporary
+    }
+
+    // MARK: - Documents: what is known about them, and fetching them
+
+    private func isHere(_ item: DocItem) -> Bool {
+        return PDFBubblePreview.isHere(fileNamed: item.storedName)
+    }
+
+    /// The line under a document's name, WhatsApp's way:
+    /// - here: "8 pages · 134 KB · pdf" (pages for a PDF only, once counted);
+    /// - not yet fetched: its size, with an arrow beside it in the cell;
+    /// - downloading: how much has come and how much there is, and the percentage.
+    private func docLine(for item: DocItem) -> (text: String, fraction: Double?, isHere: Bool) {
+        let kind = item.kind
+        if let percent = docDownloads[item.messageId] {
+            var text = "\(Int(percent))%"
+            if let bytes = TransferBytes.get(name: item.storedName), bytes.total > 0 {
+                text = VideoNote.Facts.humanSize(bytes.completed) + " / " + VideoNote.Facts.humanSize(bytes.total) + " · " + text
+            }
+            return (text, max(0, min(1, percent / 100)), false)
+        }
+        let here = isHere(item)
+        askDocFacts(for: item, here: here)
+        var parts: [String] = []
+        if here, let pages = docPages[item.storedName], pages > 0 {
+            parts.append(pages == 1 ? "1 page".localized() : String(format: "%d pages".localized(), pages))
+        }
+        if let size = docSizes[item.storedName], size > 0 {
+            parts.append(VideoNote.Facts.humanSize(size))
+        }
+        if here, !kind.isEmpty {
+            parts.append(kind)
+        }
+        return (parts.joined(separator: " · "), nil, here)
+    }
+
+    /// Finds out once what a row says about its file: the size (the sender's figure, else the
+    /// server's), and a PDF's page count once it is on the device. The row redraws its line as
+    /// each answer arrives.
+    private func askDocFacts(for item: DocItem, here: Bool) {
+        let name = item.storedName
+        guard !name.isEmpty, askedDocFacts.insert(name + (here ? "#here" : "#away")).inserted else {
+            return
+        }
+        if docSizes[name] == nil {
+            let known = VideoNote.Facts.expectedSize(ofAttachmentNamed: name)
+            if known > 0 {
+                docSizes[name] = known
+            } else {
+                Download.remoteSize(forKey: name) { [weak self] answer in
+                    guard let self = self, answer > 0 else { return }
+                    self.docSizes[name] = answer
+                    self.refreshDocRows(storedName: name)
                 }
-            } catch {
-                return
             }
         }
-        onGoToMessage?(item.messageId)
+        if here, item.kind == "pdf", docPages[name] == nil {
+            PDFBubblePreview.facts(ofFileNamed: name) { [weak self] _, pages in
+                guard let self = self, pages > 0 else { return }
+                self.docPages[name] = pages
+                self.refreshDocRows(storedName: name)
+            }
+        }
+    }
+
+    /// Redraws the line of every visible row for one file, without reloading the rows.
+    private func refreshDocRows(storedName: String) {
+        guard currentTab == .docs else {
+            return
+        }
+        for indexPath in list.indexPathsForVisibleRows ?? [] {
+            guard indexPath.section < sections.count, indexPath.row < sections[indexPath.section].rows.count else {
+                continue
+            }
+            let index = sections[indexPath.section].rows[indexPath.row]
+            guard index < shownDocs.count, shownDocs[index].storedName == storedName,
+                  let cell = list.cellForRow(at: indexPath) as? AttachmentRowCell else {
+                continue
+            }
+            let line = docLine(for: shownDocs[index])
+            cell.setLine(line.text, downloadFraction: line.fraction, isHere: line.isHere)
+        }
+    }
+
+    /// Fetches a document, counting up in its row, and runs `done` once it is on the device.
+    private func downloadDoc(_ item: DocItem, then done: (() -> Void)? = nil) {
+        guard !item.storedName.isEmpty, docDownloads[item.messageId] == nil else {
+            return
+        }
+        docDownloads[item.messageId] = 0
+        refreshDocRows(storedName: item.storedName)
+        Download().startHTTP(forKey: item.storedName) { [weak self] _, progress in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if progress < 0 {
+                    self.docDownloads[item.messageId] = nil
+                    self.refreshDocRows(storedName: item.storedName)
+                    self.view.presentToast("Download failed. Please try again.".localized())
+                    return
+                }
+                if progress >= 100 {
+                    self.docDownloads[item.messageId] = nil
+                    TransferBytes.clear(name: item.storedName)
+                    self.refreshDocRows(storedName: item.storedName)
+                    done?()
+                    return
+                }
+                self.docDownloads[item.messageId] = progress
+                self.refreshDocRows(storedName: item.storedName)
+            }
+        }
+    }
+
+    /// The share sheet for a document - fetched first if it is not here yet.
+    private func shareDoc(_ item: DocItem) {
+        guard isHere(item) else {
+            downloadDoc(item) { [weak self] in self?.shareDoc(item) }
+            return
+        }
+        guard let url = readableURL(for: item) else {
+            return
+        }
+        let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        sheet.popoverPresentationController?.sourceView = view
+        sheet.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+        present(sheet, animated: true)
+    }
+
+    /// Marks a document or a link starred or not in every list, after the conversation has been
+    /// asked to.
+    private func setStarred(_ starred: Bool, messageId: String) {
+        if let index = docs.firstIndex(where: { $0.messageId == messageId }) {
+            docs[index].isStarred = starred
+        }
+        if let index = shownDocs.firstIndex(where: { $0.messageId == messageId }) {
+            shownDocs[index].isStarred = starred
+        }
+        if let index = links.firstIndex(where: { $0.messageId == messageId }) {
+            links[index].isStarred = starred
+        }
+        if let index = shownLinks.firstIndex(where: { $0.messageId == messageId }) {
+            shownLinks[index].isStarred = starred
+        }
+        if let index = media.firstIndex(where: { $0.messageId == messageId }) {
+            media[index].isStarred = starred
+        }
     }
 
     private func preview(_ url: URL) {
@@ -1920,7 +2633,329 @@ extension MediaBrowserViewController: UITableViewDataSource, UITableViewDelegate
     }
 
     public func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        return 74
+        // A link card is as tall as what it says - title, description, site, and the message's
+        // own words under them.
+        return currentTab == .links ? UITableView.automaticDimension : 74
+    }
+
+    public func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
+        return currentTab == .links ? 150 : 74
+    }
+
+    /// Holding a document, as in WhatsApp: a look at what is in it above Go to message, Star, Share
+    /// and Delete - and, for a file still to be fetched, Download first and no look, since there is
+    /// nothing yet to look at.
+    public func tableView(_ tableView: UITableView, contextMenuConfigurationForRowAt indexPath: IndexPath,
+                          point: CGPoint) -> UIContextMenuConfiguration? {
+        guard currentTab != .media, !isSelecting, indexPath.section < sections.count,
+              indexPath.row < sections[indexPath.section].rows.count else {
+            return nil
+        }
+        let index = sections[indexPath.section].rows[indexPath.row]
+        if currentTab == .links {
+            return index < shownLinks.count ? linkMenu(for: shownLinks[index]) : nil
+        }
+        guard index < shownDocs.count else {
+            return nil
+        }
+        let item = shownDocs[index]
+        let here = isHere(item)
+        let preview: UIContextMenuContentPreviewProvider? = here ? { [weak self] in
+            guard let self = self else { return nil }
+            return DocPreviewController(url: self.readableURL(for: item), title: item.fileName, kind: item.kind)
+        } : nil
+        return UIContextMenuConfiguration(identifier: item.messageId as NSString, previewProvider: preview) { [weak self] _ in
+            guard let self = self else { return nil }
+            var actions: [UIMenuElement] = []
+            if !here {
+                actions.append(UIAction(title: "Download".localized(), image: UIImage(systemName: "arrow.down.circle")) { [weak self] _ in
+                    self?.downloadDoc(item)
+                })
+            }
+            if let goTo = self.onGoToMessage {
+                actions.append(UIAction(title: "Go to Message".localized(), image: UIImage(systemName: "bubble.left")) { _ in
+                    goTo(item.messageId)
+                })
+            }
+            if let star = self.onStar {
+                let starred = self.docs.first(where: { $0.messageId == item.messageId })?.isStarred ?? item.isStarred
+                actions.append(UIAction(title: (starred ? "Unstar" : "Star").localized(),
+                                        image: UIImage(systemName: starred ? "star.slash" : "star")) { [weak self] _ in
+                    star(item.messageId)
+                    self?.setStarred(!starred, messageId: item.messageId)
+                })
+            }
+            if item.canShare {
+                actions.append(UIAction(title: "Share".localized(), image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
+                    self?.shareDoc(item)
+                })
+            }
+            if let delete = self.onDelete {
+                actions.append(UIAction(title: "Delete".localized(), image: UIImage(systemName: "trash"), attributes: .destructive) { _ in
+                    delete([item.messageId])
+                })
+            }
+            return UIMenu(title: "", children: actions)
+        }
+    }
+
+    /// Holding a link, as in WhatsApp: the page itself above Open link, Go to message, Star, Share
+    /// and Delete. WhatsApp's Add to Reading List is left out - there is no reading list here.
+    private func linkMenu(for item: LinkItem) -> UIContextMenuConfiguration {
+        let preview: UIContextMenuContentPreviewProvider? = URL(string: item.url).map { url in
+            { LinkPagePreviewController(url: url) }
+        }
+        return UIContextMenuConfiguration(identifier: ("link:" + item.messageId) as NSString, previewProvider: preview) { [weak self] _ in
+            guard let self = self else { return nil }
+            var actions: [UIMenuElement] = [
+                UIAction(title: "Open link".localized(), image: UIImage(systemName: "safari")) { [weak self] _ in
+                    self?.openLink(item)
+                }
+            ]
+            if let goTo = self.onGoToMessage {
+                actions.append(UIAction(title: "Go to Message".localized(), image: UIImage(systemName: "bubble.left")) { _ in
+                    goTo(item.messageId)
+                })
+            }
+            if let star = self.onStar {
+                let starred = self.links.first(where: { $0.messageId == item.messageId })?.isStarred ?? item.isStarred
+                actions.append(UIAction(title: (starred ? "Unstar" : "Star").localized(),
+                                        image: UIImage(systemName: starred ? "star.slash" : "star")) { [weak self] _ in
+                    star(item.messageId)
+                    self?.setStarred(!starred, messageId: item.messageId)
+                })
+            }
+            if item.canShare {
+                actions.append(UIAction(title: "Share".localized(), image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
+                    self?.shareLink(item)
+                })
+            }
+            if let delete = self.onDelete {
+                actions.append(UIAction(title: "Delete".localized(), image: UIImage(systemName: "trash"), attributes: .destructive) { _ in
+                    delete([item.messageId])
+                })
+            }
+            return UIMenu(title: "", children: actions)
+        }
+    }
+
+    /// Tapping the look opens what was held: the document, or the link.
+    public func tableView(_ tableView: UITableView, willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
+                          animator: UIContextMenuInteractionCommitAnimating) {
+        guard let identifier = configuration.identifier as? String else {
+            return
+        }
+        if identifier.hasPrefix("link:") {
+            let messageId = String(identifier.dropFirst(5))
+            guard let item = shownLinks.first(where: { $0.messageId == messageId }) else {
+                return
+            }
+            animator.addCompletion { [weak self] in
+                self?.openLink(item)
+            }
+            return
+        }
+        guard let item = shownDocs.first(where: { $0.messageId == identifier }) else {
+            return
+        }
+        animator.addCompletion { [weak self] in
+            self?.open(item)
+        }
+    }
+}
+
+/// The look at a link a held row shows, as WhatsApp's: the page itself, loaded live, under a thin
+/// strip with the site's address.
+final class LinkPagePreviewController: UIViewController, WKNavigationDelegate {
+
+    private let url: URL
+    private let web = WKWebView(frame: .zero, configuration: {
+        let configuration = WKWebViewConfiguration()
+        configuration.allowsInlineMediaPlayback = true
+        configuration.mediaTypesRequiringUserActionForPlayback = .all
+        configuration.websiteDataStore = .nonPersistent()
+        return configuration
+    }())
+    private let spinner = UIActivityIndicatorView(style: .medium)
+
+    init(url: URL) {
+        self.url = url
+        super.init(nibName: nil, bundle: nil)
+        let screen = UIScreen.main.bounds.size
+        let width = min(screen.width - 32, 420)
+        preferredContentSize = CGSize(width: width, height: min(width * 1.45, screen.height * 0.6))
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .secondarySystemBackground
+
+        let address = UILabel()
+        var host = url.host ?? url.absoluteString
+        if host.lowercased().hasPrefix("www.") {
+            host = String(host.dropFirst(4))
+        }
+        address.text = host
+        address.font = .systemFont(ofSize: 12)
+        address.textColor = .secondaryLabel
+        address.textAlignment = .center
+        address.lineBreakMode = .byTruncatingMiddle
+        address.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(address)
+
+        web.navigationDelegate = self
+        web.isOpaque = false
+        web.backgroundColor = .secondarySystemBackground
+        web.scrollView.isScrollEnabled = false
+        web.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(web)
+
+        spinner.startAnimating()
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(spinner)
+
+        NSLayoutConstraint.activate([
+            address.topAnchor.constraint(equalTo: view.topAnchor, constant: 6),
+            address.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            address.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            address.heightAnchor.constraint(equalToConstant: 16),
+            web.topAnchor.constraint(equalTo: address.bottomAnchor, constant: 6),
+            web.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            web.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            web.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            spinner.centerXAnchor.constraint(equalTo: web.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: web.centerYAnchor)
+        ])
+        web.load(URLRequest(url: url))
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        spinner.stopAnimating()
+        spinner.isHidden = true
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        spinner.stopAnimating()
+        spinner.isHidden = true
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        spinner.stopAnimating()
+        spinner.isHidden = true
+    }
+
+    /// Only a look: a page that wants to take the reader to an app or a store from inside the
+    /// preview stays where it is.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        let scheme = navigationAction.request.url?.scheme?.lowercased() ?? ""
+        decisionHandler(scheme == "http" || scheme == "https" || scheme == "about" || scheme == "blob" || scheme == "data" ? .allow : .cancel)
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        web.stopLoading()
+    }
+}
+
+/// The look at a document a held row shows: its name across the top, and under it the pages of a
+/// PDF to scroll through, the text of a text file, or the first page of anything else Quick Look
+/// can draw.
+final class DocPreviewController: UIViewController {
+
+    private let url: URL?
+    private let fileTitle: String
+    private let kind: String
+
+    init(url: URL?, title: String, kind: String) {
+        self.url = url
+        self.fileTitle = title
+        self.kind = kind
+        super.init(nibName: nil, bundle: nil)
+        let width = min(UIScreen.main.bounds.width - 32, 420)
+        preferredContentSize = CGSize(width: width, height: width * 1.25)
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .secondarySystemBackground
+
+        let titleLabel = UILabel()
+        titleLabel.text = fileTitle
+        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.textAlignment = .center
+        titleLabel.lineBreakMode = .byTruncatingMiddle
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(titleLabel)
+
+        let body = makeBody()
+        body.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(body)
+        NSLayoutConstraint.activate([
+            titleLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            body.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 10),
+            body.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            body.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            body.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
+    private static let textKinds: Set<String> = ["txt", "md", "log", "json", "xml", "csv", "yml", "yaml", "html", "htm"]
+
+    private func makeBody() -> UIView {
+        guard let url = url else {
+            return UIView()
+        }
+        let kind = self.kind.isEmpty ? url.pathExtension.lowercased() : self.kind
+        if kind == "pdf", let document = PDFDocument(url: url) {
+            let pdf = PDFView()
+            pdf.document = document
+            pdf.autoScales = true
+            pdf.displayMode = .singlePageContinuous
+            pdf.backgroundColor = .secondarySystemBackground
+            return pdf
+        }
+        if DocPreviewController.textKinds.contains(kind), let text = try? String(contentsOf: url, encoding: .utf8) {
+            let textView = UITextView()
+            textView.isEditable = false
+            textView.backgroundColor = .systemBackground
+            textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+            textView.text = String(text.prefix(20_000))
+            textView.textContainerInset = UIEdgeInsets(top: 12, left: 10, bottom: 12, right: 10)
+            return textView
+        }
+        // Anything else: the first page, drawn by Quick Look.
+        let picture = UIImageView()
+        picture.contentMode = .scaleAspectFit
+        picture.backgroundColor = .systemBackground
+        let spinner = UIActivityIndicatorView(style: .medium)
+        spinner.startAnimating()
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        picture.addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: picture.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: picture.centerYAnchor)
+        ])
+        let size = preferredContentSize
+        let request = QLThumbnailGenerator.Request(fileAt: url, size: size, scale: UIScreen.main.scale,
+                                                   representationTypes: .thumbnail)
+        QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { [weak picture, weak spinner] representation, _ in
+            DispatchQueue.main.async {
+                spinner?.removeFromSuperview()
+                picture?.image = representation?.uiImage ?? UIImage(systemName: "doc")
+            }
+        }
+        return picture
     }
 }
 
@@ -2111,7 +3146,391 @@ final class MediaTileCell: UICollectionViewCell {
     }
 }
 
-/// One row of the Links or Docs list.
+/// The count of photos and videos as the last line of the Media grid.
+final class GridCountFooter: UICollectionReusableView {
+
+    let label = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        label.font = .systemFont(ofSize: 17)
+        label.textColor = .label
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+}
+
+/// The media browser's colours, light and dark, as WhatsApp's Media / Links / Docs screen has
+/// them: white with pale grey month strips and cards in light mode, black with dark grey ones in
+/// dark mode.
+enum BrowserPalette {
+
+    private static func pair(light: CGFloat, dark: CGFloat) -> UIColor {
+        return UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: dark, alpha: 1) : UIColor(white: light, alpha: 1) }
+    }
+
+    static let monthStrip = pair(light: 0.95, dark: 0.10)
+    static let cardTop = pair(light: 0.95, dark: 0.19)
+    static let cardFoot = pair(light: 1.0, dark: 0.12)
+    static let cardEdge = pair(light: 0.88, dark: 0.26)
+    static let pictureWell = pair(light: 0.90, dark: 0.25)
+    static let compassDisc = pair(light: 0.62, dark: 0.36)
+    static let compassGlyph = pair(light: 0.95, dark: 0.62)
+    static let pageSheet = pair(light: 0.92, dark: 0.24)
+    static let pageEdge = pair(light: 0.84, dark: 0.32)
+    static let pageFold = pair(light: 0.80, dark: 0.40)
+    static let plainTag = pair(light: 0.62, dark: 0.36)
+    static let plainTagText = pair(light: 1.0, dark: 0.72)
+    static let selectedSegment = UIColor {
+        $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.22) : UIColor(white: 0, alpha: 0.08)
+    }
+    /// What marks a searched word: a muted olive in dark mode, a soft yellow in light.
+    static let searchMark = UIColor {
+        $0.userInterfaceStyle == .dark
+            ? UIColor(red: 0.62, green: 0.56, blue: 0.22, alpha: 0.75)
+            : UIColor(red: 1.0, green: 0.86, blue: 0.35, alpha: 0.7)
+    }
+}
+
+/// One row of the Links list, as WhatsApp draws it: a card with the page's picture - or a compass
+/// where there is none - beside its title, description and site, and under it what the link was
+/// sent with (two lines at most), or "View message" when it was sent alone; either goes to the
+/// message. The card
+/// itself opens the link. While searching, what was searched for is marked wherever it shows.
+final class LinkCardCell: UITableViewCell {
+
+    var onViewMessage: (() -> Void)?
+
+    private let card = UIView()
+    private let top = UIView()
+    private let picture = UIImageView()
+    private let compass = UIImageView(image: UIImage(systemName: "safari", withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .regular)))
+    private let playMark = UIImageView(image: UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .bold)))
+    private let title = UILabel()
+    private let blurb = UILabel()
+    private let site = UILabel()
+    private let footer = UIButton(type: .custom)
+    private let footerLabel = UILabel()
+    private let chevron = UIImageView(image: UIImage(systemName: "chevron.right", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)))
+    private let tick = UIImageView()
+    private var cardLeading: NSLayoutConstraint!
+    /// The picture this row was last asked for, so one arriving after the row was reused is dropped.
+    private var pictureAddress = ""
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        backgroundColor = .clear
+        selectionStyle = .none
+
+        card.backgroundColor = BrowserPalette.cardFoot
+        card.layer.cornerRadius = 4
+        card.layer.borderWidth = 1 / UIScreen.main.scale
+        card.layer.borderColor = BrowserPalette.cardEdge.resolvedColor(with: traitCollection).cgColor
+        card.clipsToBounds = true
+        card.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(card)
+
+        top.backgroundColor = BrowserPalette.cardTop
+        top.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(top)
+
+        picture.backgroundColor = BrowserPalette.pictureWell
+        picture.contentMode = .scaleAspectFill
+        picture.clipsToBounds = true
+        // Fix: an image view asks to be as big as its picture, and a page's picture is often a
+        // full-size screenshot - a Google Docs page or a Zoom banner stretched the card to the
+        // height of the screen. The square is set by the card, never by what is in it.
+        for axis in [NSLayoutConstraint.Axis.horizontal, .vertical] {
+            picture.setContentHuggingPriority(.defaultLow, for: axis)
+            picture.setContentCompressionResistancePriority(UILayoutPriority(1), for: axis)
+        }
+        picture.translatesAutoresizingMaskIntoConstraints = false
+        top.addSubview(picture)
+
+        compass.tintColor = BrowserPalette.compassGlyph
+        compass.contentMode = .center
+        compass.backgroundColor = BrowserPalette.compassDisc
+        compass.layer.cornerRadius = 20
+        compass.clipsToBounds = true
+        compass.translatesAutoresizingMaskIntoConstraints = false
+        picture.addSubview(compass)
+
+        playMark.tintColor = .white
+        playMark.contentMode = .center
+        playMark.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        playMark.layer.cornerRadius = 14
+        playMark.clipsToBounds = true
+        playMark.translatesAutoresizingMaskIntoConstraints = false
+        picture.addSubview(playMark)
+
+        title.font = .systemFont(ofSize: 15)
+        title.textColor = .label
+        title.numberOfLines = 2
+        title.lineBreakMode = .byCharWrapping
+        blurb.font = .systemFont(ofSize: 14)
+        blurb.textColor = .secondaryLabel
+        blurb.numberOfLines = 2
+        site.font = .systemFont(ofSize: 14)
+        site.textColor = .secondaryLabel
+        site.numberOfLines = 1
+        let words = UIStackView(arrangedSubviews: [title, blurb, site])
+        words.axis = .vertical
+        words.spacing = 2
+        words.translatesAutoresizingMaskIntoConstraints = false
+        top.addSubview(words)
+
+        footer.translatesAutoresizingMaskIntoConstraints = false
+        footer.addTarget(self, action: #selector(viewMessageTapped), for: .touchUpInside)
+        card.addSubview(footer)
+        footerLabel.text = "View message".localized()
+        footerLabel.font = .systemFont(ofSize: 15)
+        footerLabel.textColor = .secondaryLabel
+        footerLabel.numberOfLines = 2
+        footerLabel.isUserInteractionEnabled = false
+        footerLabel.translatesAutoresizingMaskIntoConstraints = false
+        footer.addSubview(footerLabel)
+        chevron.tintColor = .tertiaryLabel
+        chevron.isUserInteractionEnabled = false
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+        footer.addSubview(chevron)
+
+        tick.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(tick)
+
+        cardLeading = card.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12)
+        NSLayoutConstraint.activate([
+            cardLeading,
+            card.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            card.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
+            card.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
+
+            top.topAnchor.constraint(equalTo: card.topAnchor),
+            top.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            top.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            top.heightAnchor.constraint(greaterThanOrEqualToConstant: 72),
+
+            picture.leadingAnchor.constraint(equalTo: top.leadingAnchor),
+            picture.topAnchor.constraint(equalTo: top.topAnchor),
+            picture.bottomAnchor.constraint(equalTo: top.bottomAnchor),
+            picture.widthAnchor.constraint(equalToConstant: 72),
+
+            compass.centerXAnchor.constraint(equalTo: picture.centerXAnchor),
+            compass.centerYAnchor.constraint(equalTo: picture.centerYAnchor),
+            compass.widthAnchor.constraint(equalToConstant: 40),
+            compass.heightAnchor.constraint(equalToConstant: 40),
+
+            playMark.centerXAnchor.constraint(equalTo: picture.centerXAnchor),
+            playMark.centerYAnchor.constraint(equalTo: picture.centerYAnchor),
+            playMark.widthAnchor.constraint(equalToConstant: 28),
+            playMark.heightAnchor.constraint(equalToConstant: 28),
+
+            words.leadingAnchor.constraint(equalTo: picture.trailingAnchor, constant: 12),
+            words.trailingAnchor.constraint(equalTo: top.trailingAnchor, constant: -12),
+            words.centerYAnchor.constraint(equalTo: top.centerYAnchor),
+            words.topAnchor.constraint(greaterThanOrEqualTo: top.topAnchor, constant: 10),
+            words.bottomAnchor.constraint(lessThanOrEqualTo: top.bottomAnchor, constant: -10),
+
+            footer.topAnchor.constraint(equalTo: top.bottomAnchor),
+            footer.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            footerLabel.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 12),
+            footerLabel.trailingAnchor.constraint(lessThanOrEqualTo: chevron.leadingAnchor, constant: -10),
+            footerLabel.topAnchor.constraint(equalTo: footer.topAnchor, constant: 10),
+            footerLabel.bottomAnchor.constraint(equalTo: footer.bottomAnchor, constant: -10),
+            footer.heightAnchor.constraint(greaterThanOrEqualToConstant: 40),
+            chevron.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -12),
+            chevron.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
+
+            tick.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 14),
+            tick.centerYAnchor.constraint(equalTo: card.centerYAnchor),
+            tick.widthAnchor.constraint(equalToConstant: 22),
+            tick.heightAnchor.constraint(equalToConstant: 22)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        pictureAddress = ""
+        picture.image = nil
+        onViewMessage = nil
+    }
+
+    /// The page's title where it was read, else the address itself; the site under it; and its
+    /// picture where it has one - the message's own thumbnail standing in until then.
+    func show(_ item: MediaBrowserViewController.LinkItem, facts: LinkPreviewFacts?, query: String,
+              selecting: Bool, picked: Bool) {
+        let heading = facts?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        title.attributedText = Self.marked(heading.isEmpty ? item.url : heading, query: query, label: title)
+        title.lineBreakMode = heading.isEmpty ? .byCharWrapping : .byTruncatingTail
+        let about = Self.oneLine(facts?.blurb ?? "")
+        blurb.attributedText = Self.marked(about, query: query, label: blurb)
+        blurb.isHidden = about.isEmpty
+        var host = facts?.domain ?? ""
+        if host.isEmpty {
+            host = (URL(string: item.url)?.host ?? "").lowercased()
+        }
+        site.attributedText = Self.marked(host, query: query, label: site)
+
+        // What the link was sent with, up to two lines, as WhatsApp shows it; "View message" when
+        // the link was all there was. Only the words before the black square are the sender's - what
+        // follows it is the app's own business (file names, markers), never shown.
+        footerLabel.attributedText = nil
+        let said = Self.caption(of: item)
+        footerLabel.textColor = said.isEmpty ? .secondaryLabel : .label
+        if said.isEmpty {
+            footerLabel.attributedText = Self.marked("View message".localized(), query: "", label: footerLabel)
+        } else {
+            // Fix: the caption was shown as plain characters, so *bold* came out with its stars
+            // and no bold. It is formatted the way the bubble formats it - bold, italic, struck
+            // through, mentions as names - and what was searched for is marked on top of that.
+            footerLabel.attributedText = Self.markedRich(Self.richCaption(of: item, font: footerLabel.font),
+                                                         query: query)
+        }
+
+        let address = facts?.imageUrl ?? ""
+        pictureAddress = address
+        var shown: UIImage?
+        if !address.isEmpty {
+            shown = LinkPreviewImage.cached(address)
+        }
+        if shown == nil, !item.thumbFileName.isEmpty {
+            shown = Nexilis.imageCache.object(forKey: item.thumbFileName as NSString)
+        }
+        setPicture(shown, isVideo: facts?.isVideo ?? false)
+        if !address.isEmpty, LinkPreviewImage.cached(address) == nil {
+            LinkPreviewImage.fetch(address) { [weak self] image in
+                guard let self = self, self.pictureAddress == address, let image = image else { return }
+                self.setPicture(image, isVideo: facts?.isVideo ?? false)
+            }
+        }
+
+        setSelecting(selecting, picked: picked, animated: false)
+    }
+
+    /// Choosing turned on or off: the circle comes in from the left and the card slides over.
+    func setSelecting(_ selecting: Bool, picked: Bool, animated: Bool) {
+        tick.isHidden = false
+        tick.image = UIImage(systemName: picked ? "checkmark.circle.fill" : "circle")
+        tick.tintColor = picked ? .systemBlue : .tertiaryLabel
+        cardLeading.constant = selecting ? 46 : 12
+        // While picking, the whole card is one target: it picks.
+        footer.isUserInteractionEnabled = !selecting && onViewMessage != nil
+        let changes = {
+            self.tick.alpha = selecting ? 1 : 0
+            self.tick.transform = selecting ? .identity : CGAffineTransform(translationX: -24, y: 0)
+            self.contentView.layoutIfNeeded()
+        }
+        if animated {
+            MediaBrowserViewController.selectionMotion(changes)
+        } else {
+            UIView.performWithoutAnimation(changes)
+        }
+    }
+
+    /// The sender's own words around a link: the text before the app's black square, with the link
+    /// taken out of it.
+    static func caption(of item: MediaBrowserViewController.LinkItem) -> String {
+        var said = item.caption.components(separatedBy: "\u{25A0}").first ?? ""
+        for written in [item.previewKey, item.url] where !written.isEmpty {
+            said = said.replacingOccurrences(of: written, with: " ")
+        }
+        // Fix: a mention is stored as "@" and the person's pin, and showed here as that pin; the
+        // conversation writes it as "@name", and so does this.
+        return oneLine(said.mentionsAsNames())
+    }
+
+    /// The caption formatted as the conversation formats it (String.richText), in the label's size
+    /// and the text colour wherever the formatting gives none.
+    static func richCaption(of item: MediaBrowserViewController.LinkItem, font: UIFont?) -> NSMutableAttributedString {
+        var said = item.caption.components(separatedBy: "\u{25A0}").first ?? ""
+        for written in [item.previewKey, item.url] where !written.isEmpty {
+            said = said.replacingOccurrences(of: written, with: " ")
+        }
+        let formatted = NSMutableAttributedString(attributedString: oneLine(said).richText(fontSize: font?.pointSize ?? 15))
+        let whole = NSRange(location: 0, length: formatted.length)
+        formatted.enumerateAttribute(.foregroundColor, in: whole) { value, range, _ in
+            if value == nil {
+                formatted.addAttribute(.foregroundColor, value: UIColor.label, range: range)
+            }
+        }
+        // Two lines at most, cut at the end - a paragraph style from the formatting would
+        // otherwise decide how the label wraps.
+        formatted.removeAttribute(.paragraphStyle, range: whole)
+        return formatted
+    }
+
+    /// Marks what was searched for in text that is already formatted, leaving its formatting be.
+    private static func markedRich(_ text: NSMutableAttributedString, query: String) -> NSAttributedString {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let plain = text.string
+        guard !needle.isEmpty, !plain.isEmpty else {
+            return text
+        }
+        var searchRange = plain.startIndex..<plain.endIndex
+        while let found = plain.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive], range: searchRange) {
+            text.addAttributes([.backgroundColor: BrowserPalette.searchMark, .foregroundColor: UIColor.label],
+                               range: NSRange(found, in: plain))
+            searchRange = found.upperBound..<plain.endIndex
+        }
+        return text
+    }
+
+    /// Runs of space and line breaks made one space, as a two-line label shows them.
+    private static func oneLine(_ text: String) -> String {
+        return text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// The text in the label's own font and colour, every place it holds what was searched for
+    /// marked the way WhatsApp marks it - a muted yellow behind the letters.
+    private static func marked(_ text: String, query: String, label: UILabel) -> NSAttributedString {
+        let font = label.font ?? .systemFont(ofSize: 15)
+        let colour = label.textColor ?? .label
+        let result = NSMutableAttributedString(string: text, attributes: [.font: font, .foregroundColor: colour])
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty, !text.isEmpty else {
+            return result
+        }
+        let mark = BrowserPalette.searchMark
+        var searchRange = text.startIndex..<text.endIndex
+        while let found = text.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive], range: searchRange) {
+            result.addAttributes([.backgroundColor: mark, .foregroundColor: UIColor.label], range: NSRange(found, in: text))
+            searchRange = found.upperBound..<text.endIndex
+        }
+        return result
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        // A layer's border is a CGColor and does not follow the mode by itself.
+        card.layer.borderColor = BrowserPalette.cardEdge.resolvedColor(with: traitCollection).cgColor
+    }
+
+    private func setPicture(_ image: UIImage?, isVideo: Bool) {
+        picture.image = image
+        compass.isHidden = image != nil
+        playMark.isHidden = image == nil || !isVideo
+    }
+
+    @objc private func viewMessageTapped() {
+        onViewMessage?()
+    }
+}
+
+/// One row of the Docs list.
 final class AttachmentRowCell: UITableViewCell {
 
     private let badge = UIView()
@@ -2120,6 +3539,12 @@ final class AttachmentRowCell: UITableViewCell {
     private let title = UILabel()
     private let detail = UILabel()
     private let tick = UIImageView()
+    /// A document's page, the way WhatsApp draws it - see DocPageIcon.
+    private let page = DocPageIcon()
+    /// How far a download has got, under the line that says it.
+    private let progress = UIProgressView(progressViewStyle: .bar)
+    /// Where the row's icon starts: at the edge, or past the circle while choosing.
+    private var badgeLeading: NSLayoutConstraint!
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -2159,8 +3584,23 @@ final class AttachmentRowCell: UITableViewCell {
         tick.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(tick)
 
+        page.translatesAutoresizingMaskIntoConstraints = false
+        page.isHidden = true
+        contentView.addSubview(page)
+
+        progress.trackTintColor = .tertiarySystemFill
+        progress.progressTintColor = .systemGreen
+        progress.layer.cornerRadius = 1.5
+        progress.clipsToBounds = true
+        progress.isHidden = true
+        progress.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(progress)
+
+        // Fix: the circle for choosing was at the right-hand end of the row; WhatsApp puts it at the
+        // left, before the page, and slides the row over to make room - as the Links cards do.
+        badgeLeading = badge.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16)
         NSLayoutConstraint.activate([
-            badge.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            badgeLeading,
             badge.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             badge.widthAnchor.constraint(equalToConstant: 46),
             badge.heightAnchor.constraint(equalToConstant: 52),
@@ -2173,14 +3613,24 @@ final class AttachmentRowCell: UITableViewCell {
             thumb.heightAnchor.constraint(equalTo: badge.heightAnchor),
 
             title.leadingAnchor.constraint(equalTo: badge.trailingAnchor, constant: 12),
-            title.trailingAnchor.constraint(equalTo: tick.leadingAnchor, constant: -8),
+            title.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             title.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
 
             detail.leadingAnchor.constraint(equalTo: title.leadingAnchor),
             detail.trailingAnchor.constraint(equalTo: title.trailingAnchor),
             detail.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 3),
 
-            tick.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            page.centerXAnchor.constraint(equalTo: badge.centerXAnchor),
+            page.centerYAnchor.constraint(equalTo: badge.centerYAnchor),
+            page.widthAnchor.constraint(equalToConstant: 38),
+            page.heightAnchor.constraint(equalToConstant: 50),
+
+            progress.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            progress.trailingAnchor.constraint(equalTo: title.trailingAnchor),
+            progress.topAnchor.constraint(equalTo: detail.bottomAnchor, constant: 5),
+            progress.heightAnchor.constraint(equalToConstant: 3),
+
+            tick.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 14),
             tick.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             tick.widthAnchor.constraint(equalToConstant: 22),
             tick.heightAnchor.constraint(equalToConstant: 22)
@@ -2191,20 +3641,52 @@ final class AttachmentRowCell: UITableViewCell {
         return nil
     }
 
-    func showDoc(_ item: MediaBrowserViewController.DocItem, selecting: Bool, picked: Bool) {
+    /// A document row, as WhatsApp draws one: its page with the extension on it, the name, and
+    /// under it what the browser knows - "8 pages · 134 KB · pdf" once it is here, its size while
+    /// it is still to be fetched, and how far along a download is while one runs.
+    ///
+    /// Fix: the page was a grey square with the extension in it, and the line under the name was
+    /// the caption followed by the extension - the size was never there, because a file message
+    /// does not carry it, so most rows read "• pdf".
+    func showDoc(_ item: MediaBrowserViewController.DocItem, line: String, downloadFraction: Double?, isHere: Bool,
+                 selecting: Bool, picked: Bool) {
         thumb.isHidden = true
-        badge.isHidden = false
-        let kind = (item.fileName as NSString).pathExtension.lowercased()
-        badgeLabel.text = kind.isEmpty ? "DOC" : String(kind.prefix(4)).uppercased()
-        badgeLabel.textColor = kind == "pdf" ? .systemRed : .secondaryLabel
+        badge.isHidden = true
+        page.isHidden = false
+        page.kind = item.kind
         title.text = item.fileName
-        // The size travels with the message; the kind is read off the name so a file that never
-        // carried one still says what it is.
-        detail.text = [item.detail, kind].filter { !$0.isEmpty }.joined(separator: " • ")
+        setLine(line, downloadFraction: downloadFraction, isHere: isHere)
         applyTick(selecting: selecting, picked: picked)
     }
 
+    /// Only the line and the bar - what a download changes many times a second.
+    func setLine(_ line: String, downloadFraction: Double?, isHere: Bool) {
+        if !isHere, downloadFraction == nil, !line.isEmpty {
+            // Still to be fetched: a down arrow says so, as the reference's size line does.
+            let text = NSMutableAttributedString()
+            let arrow = NSTextAttachment()
+            arrow.image = UIImage(systemName: "arrow.down.circle", withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .medium))?
+                .withTintColor(.secondaryLabel, renderingMode: .alwaysOriginal)
+            text.append(NSAttributedString(attachment: arrow))
+            text.append(NSAttributedString(string: " " + line, attributes: [.font: detail.font as Any, .foregroundColor: UIColor.secondaryLabel]))
+            detail.attributedText = text
+        } else {
+            detail.attributedText = nil
+            detail.text = line
+        }
+        if let fraction = downloadFraction {
+            progress.isHidden = false
+            progress.setProgress(Float(fraction), animated: true)
+        } else {
+            progress.isHidden = true
+            progress.setProgress(0, animated: false)
+        }
+    }
+
     func showLink(_ item: MediaBrowserViewController.LinkItem, selecting: Bool, picked: Bool) {
+        page.isHidden = true
+        progress.isHidden = true
+        detail.attributedText = nil
         badge.isHidden = false
         badgeLabel.text = "LINK"
         badgeLabel.textColor = .secondaryLabel
@@ -2215,11 +3697,117 @@ final class AttachmentRowCell: UITableViewCell {
         applyTick(selecting: selecting, picked: picked)
     }
 
-    private func applyTick(selecting: Bool, picked: Bool) {
-        tick.isHidden = !selecting
+    /// Choosing turned on or off for a row already on screen.
+    func setSelecting(_ selecting: Bool, picked: Bool, animated: Bool) {
+        applyTick(selecting: selecting, picked: picked, animated: animated)
+    }
+
+    private func applyTick(selecting: Bool, picked: Bool, animated: Bool = false) {
+        tick.isHidden = false
         tick.image = UIImage(systemName: picked ? "checkmark.circle.fill" : "circle")
         tick.tintColor = picked ? .systemBlue : .tertiaryLabel
+        badgeLeading.constant = selecting ? 50 : 16
+        let changes = {
+            self.tick.alpha = selecting ? 1 : 0
+            self.tick.transform = selecting ? .identity : CGAffineTransform(translationX: -24, y: 0)
+            self.contentView.layoutIfNeeded()
+        }
+        if animated {
+            MediaBrowserViewController.selectionMotion(changes)
+        } else {
+            UIView.performWithoutAnimation(changes)
+        }
     }
+}
+
+/// A document's page as WhatsApp's Docs list draws it: a grey sheet with its top-right corner
+/// turned down, and the extension on a small tag across the foot - the tag in the kind's own
+/// colour (the red of a PDF, the blue of a Word file, ...) where it has one, grey otherwise.
+final class DocPageIcon: UIView {
+
+    var kind = "" {
+        didSet { setNeedsDisplay() }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        contentMode = .redraw
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
+            setNeedsDisplay()
+        }
+    }
+
+    override func draw(_ rect: CGRect) {
+        let size = bounds.size
+        let fold = size.width * 0.30
+        let radius: CGFloat = 4
+        let sheet = UIBezierPath()
+        sheet.move(to: CGPoint(x: radius, y: 0))
+        sheet.addLine(to: CGPoint(x: size.width - fold, y: 0))
+        sheet.addLine(to: CGPoint(x: size.width, y: fold))
+        sheet.addLine(to: CGPoint(x: size.width, y: size.height - radius))
+        sheet.addQuadCurve(to: CGPoint(x: size.width - radius, y: size.height), controlPoint: CGPoint(x: size.width, y: size.height))
+        sheet.addLine(to: CGPoint(x: radius, y: size.height))
+        sheet.addQuadCurve(to: CGPoint(x: 0, y: size.height - radius), controlPoint: CGPoint(x: 0, y: size.height))
+        sheet.addLine(to: CGPoint(x: 0, y: radius))
+        sheet.addQuadCurve(to: CGPoint(x: radius, y: 0), controlPoint: .zero)
+        sheet.close()
+        BrowserPalette.pageSheet.resolvedColor(with: traitCollection).setFill()
+        sheet.fill()
+        BrowserPalette.pageEdge.resolvedColor(with: traitCollection).setStroke()
+        sheet.lineWidth = 1
+        sheet.stroke()
+
+        let corner = UIBezierPath()
+        corner.move(to: CGPoint(x: size.width - fold, y: 0))
+        corner.addLine(to: CGPoint(x: size.width - fold, y: fold - 2))
+        corner.addQuadCurve(to: CGPoint(x: size.width - fold + 2, y: fold), controlPoint: CGPoint(x: size.width - fold, y: fold))
+        corner.addLine(to: CGPoint(x: size.width, y: fold))
+        corner.close()
+        BrowserPalette.pageFold.resolvedColor(with: traitCollection).setFill()
+        corner.fill()
+
+        let label = DocumentBadge.label(of: kind)
+        let coloured = DocPageIcon.colouredKinds.contains(kind)
+        let font = UIFont.systemFont(ofSize: 9, weight: .bold)
+        var text = NSAttributedString(string: label, attributes: [.font: font])
+        var textSize = text.size()
+        let maxTagWidth = size.width - 6
+        var drawFont = font
+        if textSize.width + 8 > maxTagWidth {
+            drawFont = .systemFont(ofSize: 9 * (maxTagWidth - 8) / textSize.width, weight: .bold)
+            text = NSAttributedString(string: label, attributes: [.font: drawFont])
+            textSize = text.size()
+        }
+        let tagWidth = min(maxTagWidth, textSize.width + 8)
+        let tagHeight = textSize.height + 3
+        let tag = CGRect(x: (size.width - tagWidth) / 2, y: size.height - tagHeight - size.height * 0.16,
+                         width: tagWidth, height: tagHeight)
+        (coloured ? DocumentBadge.colour(of: kind) : BrowserPalette.plainTag.resolvedColor(with: traitCollection)).setFill()
+        UIBezierPath(roundedRect: tag, cornerRadius: 3).fill()
+        NSAttributedString(string: label, attributes: [
+            .font: drawFont,
+            .foregroundColor: coloured ? UIColor.white : BrowserPalette.plainTagText.resolvedColor(with: traitCollection)
+        ]).draw(at: CGPoint(x: tag.midX - textSize.width / 2, y: tag.midY - textSize.height / 2))
+    }
+
+    /// The kinds that get their own colour on the tag, as in the reference; everything else
+    /// (text, archives, apps) keeps a grey one.
+    private static let colouredKinds: Set<String> = [
+        "pdf", "doc", "docx", "rtf", "odt", "pages",
+        "xls", "xlsx", "xlsm", "csv", "ods", "numbers",
+        "ppt", "pptx", "odp", "key"
+    ]
 }
 
 /// Grows a picture out of its square in the grid, and shrinks it back into it.

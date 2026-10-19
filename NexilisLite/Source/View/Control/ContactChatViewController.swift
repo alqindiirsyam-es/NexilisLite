@@ -73,6 +73,9 @@ class ContactChatViewController: UITableViewController {
     var noData = false
     
     var loadingData = true
+    /// Whether the rows on screen are the ones kept from the last launch (ChatListSnapshot),
+    /// not yet replaced by a read of the database.
+    private var showingSnapshot = false
     var isGettingData = false
     // Whether the recursive walk over GROUPZ is in flight. The chats and contacts do not wait
     // for it, so without this a refresh arriving meanwhile would start a second walk on top.
@@ -463,6 +466,9 @@ class ContactChatViewController: UITableViewController {
     }
     
     override func viewWillAppear(_ animated: Bool) {
+        // The list as it was last shown, before the first frame - the read in viewDidAppear
+        // replaces it.
+        showSnapshotIfAny()
         let attributes = [NSAttributedString.Key.font: UIFont.boldSystemFont(ofSize: 16.0), NSAttributedString.Key.foregroundColor: UIColor.white]
         let navBarAppearance = UINavigationBarAppearance()
         navBarAppearance.configureWithOpaqueBackground()
@@ -599,12 +605,21 @@ class ContactChatViewController: UITableViewController {
     
     @objc func onDisconnected(notification: NSNotification) {
         DispatchQueue.main.async {
-            self.loadingData = true
-            self.chatGroupMaps.removeAll()
-            self.chats.removeAll()
-            self.contacts.removeAll()
-            self.groups.removeAll()
-            self.tableView.reloadData()
+            // Fix: every list emptied itself here and said "Loading Data..." until the database had
+            // been opened again and read - and this is posted each time the app comes back to the
+            // front (the database is closed while it is away), when it opens again, and when the
+            // phone is back online: twenty notifications, open the app, and the list went blank
+            // before it showed them. Only offline, where nothing may be read (OfflinePolicy), is the
+            // list taken down. Otherwise what was on screen stays there - it was on screen all the
+            // while the app was away - and the reload below updates it in place, as WhatsApp does.
+            if OfflinePolicy.isBlocking {
+                self.loadingData = true
+                self.chatGroupMaps.removeAll()
+                self.chats.removeAll()
+                self.contacts.removeAll()
+                self.groups.removeAll()
+                self.tableView.reloadData()
+            }
             // Offline where the keys are not kept on the device: the list says why it is empty.
             OfflinePolicy.applyEmptyState(to: self.tableView)
             self.reloadAllData()
@@ -773,7 +788,17 @@ class ContactChatViewController: UITableViewController {
     // Puts whatever was just read on screen and releases anyone waiting on the reload.
     private func finishGettingData() {
         DispatchQueue.main.async {
+            let replacingSnapshot = self.showingSnapshot
+            self.showingSnapshot = false
             self.publishChatRows()
+            if replacingSnapshot {
+                // Rows the read did not change are not redrawn by the plan, and they were drawn
+                // before anything could be read - a picture still locked away, say.
+                UIView.performWithoutAnimation {
+                    self.tableView.reloadRows(at: self.tableView.indexPathsForVisibleRows ?? [], with: .none)
+                }
+            }
+            self.saveSnapshot()
             self.loadingData = false
             self.isGettingData = false
             self.loadStartedAt = nil
@@ -913,6 +938,7 @@ class ContactChatViewController: UITableViewController {
             }
         }
         guard changed else { return }
+        saveSnapshot()
         guard isShowingChatRows, !changedRows.isEmpty, tableView.numberOfSections == 1,
               tableView.numberOfRows(inSection: 0) == chats.count else {
             tableView.reloadData()
@@ -2053,8 +2079,41 @@ extension ContactChatViewController {
         if components.count >= 2 {
             fullname = components.prefix(2).joined(separator: " ")
         }
-        groupSenderNames[key] = fullname
+        // Not kept when nothing was found: drawn before the database is open (a cold launch, the
+        // list shown from ChatListSnapshot), an empty name was kept for good.
+        if !fullname.isEmpty {
+            groupSenderNames[key] = fullname
+        }
         return fullname
+    }
+
+    // MARK: - The list kept for a cold launch
+
+    private static let snapshotName = "contactchat"
+
+    /// Puts the list last kept for this account on screen, if there is one and it may be shown.
+    private func showSnapshotIfAny() {
+        guard chats.isEmpty, let kept = ChatListSnapshot.load(ContactChatViewController.snapshotName) else {
+            return
+        }
+        chats = kept.chats
+        chatGroupMaps = kept.groupMaps
+        archivedChats = kept.archived
+        listMaxArchived = kept.maxArchived
+        groupSenderNames.merge(kept.senderNames) { current, _ in current }
+        showingSnapshot = true
+        loadingData = false
+        tableView.reloadData()
+    }
+
+    /// Keeps the list as it is now for the next cold launch.
+    private func saveSnapshot() {
+        guard !showingSnapshot, !chats.isEmpty else { return }
+        ChatListSnapshot.save(ContactChatViewController.snapshotName,
+                              content: ChatListSnapshot.Content(chats: chats, groupMaps: chatGroupMaps,
+                                                                archived: archivedChats,
+                                                                maxArchived: listMaxArchived,
+                                                                senderNames: groupSenderNames))
     }
 
     /// What the search field holds while it is filtering, for the results to be lit by.
@@ -2089,7 +2148,7 @@ extension ContactChatViewController {
                 }
                 let rowSignature = [
                     "\(indexPath.section).\(indexPath.row)",
-                    "\(isFiltering)|\(noData)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)|\(highlightQuery)",
+                    "\(isFiltering)|\(noData)|\(showingSnapshot)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)|\(highlightQuery)",
                     "\(traitCollection.userInterfaceStyle.rawValue)|\(String.offset())|\(Int(view.frame.width))",
                     CellBuildSignature.describe(contactForRow)
                 ].joined(separator: ";")
@@ -2174,7 +2233,7 @@ extension ContactChatViewController {
                 }
                 let rowSignature = [
                     "\(indexPath.section).\(indexPath.row)",
-                    "\(isFiltering)|\(noData)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)|\(highlightQuery)",
+                    "\(isFiltering)|\(noData)|\(showingSnapshot)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)|\(highlightQuery)",
                     "\(traitCollection.userInterfaceStyle.rawValue)|\(String.offset())|\(Int(view.frame.width))",
                     CellBuildSignature.describe(chatForRow)
                 ].joined(separator: ";")
@@ -2686,7 +2745,7 @@ extension ContactChatViewController {
                 }
                 let rowSignature = [
                     "\(indexPath.section).\(indexPath.row)",
-                    "\(isFiltering)|\(noData)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)|\(highlightQuery)",
+                    "\(isFiltering)|\(noData)|\(showingSnapshot)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)|\(highlightQuery)",
                     "\(traitCollection.userInterfaceStyle.rawValue)|\(String.offset())|\(Int(view.frame.width))",
                     CellBuildSignature.describe(contactForRow)
                 ].joined(separator: ";")

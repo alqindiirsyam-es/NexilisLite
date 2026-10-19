@@ -417,6 +417,8 @@ public class APIS: NSObject {
 
     private static func setApplicationBadge(_ value: Int) {
         UserDefaults.standard.set(value, forKey: lastBadgeKey)
+        // The extension counts on from the badge the app last set.
+        NotificationShare.noteBadge(value)
         if #available(iOS 16.0, *) {
             // Settable from any thread and without the app being active, unlike the old
             // property - which is exactly what a background push handler needs.
@@ -1988,6 +1990,8 @@ public class APIS: NSObject {
             APIS.showChangeProfile()
             return
         }
+        // The account's credentials, names and inbox, out of reach of the notification extension.
+        NotificationShare.clear()
         Nexilis.destroyAll()
         _ = Nexilis.write(message: CoreMessage_TMessageBank.getLogout())
     }
@@ -2595,6 +2599,110 @@ public class APIS: NSObject {
     // Always hops onto a background queue internally, so it's safe to call this from
     // main-thread contexts too (e.g. getMessageById's network completion handler)
     // without blocking the UI during the retry delays.
+    /// Saves a message the Notification Service Extension pulled and kept in the inbox
+    /// (NotificationShare.importInbox) - exactly as a message pulled here by getMessageById is
+    /// saved: the same save with its retries, the push's id tied to the message's, the id taken off
+    /// the pending list, and the server told it has arrived (the extension already told it; once
+    /// more is harmless, and covers an extension whose own ack did not get out).
+    static func saveInboxMessage(packed: String, pushId: String, completion: @escaping (Bool) -> Void) {
+        let message = TMessage(data: packed)
+        let messageId = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID, default_value: "")
+        guard !messageId.isEmpty else {
+            // Nothing usable in it - nothing to keep it for either.
+            completion(true)
+            return
+        }
+        saveIncomingMessageWithRetry(message: message, messageId: messageId) { success in
+            if success {
+                if !pushId.isEmpty {
+                    APNMessageAliasStore.shared.record(apnId: pushId, storedId: messageId)
+                    PendingMessageStore.shared.remove(pushId)
+                    ackAPN(id: pushId)
+                }
+            }
+            completion(success)
+        }
+    }
+
+    /// The inbox, saved all at once - one entry's result per entry, in order.
+    ///
+    /// Fix: it was saved one message at a time through saveIncomingMessageWithRetry, the chat list
+    /// waiting for the last of them, and the import starts as the app comes back to the front - the
+    /// moment the database is being opened again (recreateInstance). The first save found it
+    /// closed and waited out its backoff, half a second and then a second, and every message after
+    /// it was verified and counted on the badge on its own: sixteen notifications took more than
+    /// three seconds to reach the list. The database is waited for now - only as long as it takes
+    /// to open - and then every message is saved, all of them checked with one query, and the badge
+    /// counted once. Whatever still did not save goes the old way, with its retries.
+    static func saveInboxMessages(_ entries: [(packed: String, pushId: String)], completion: @escaping ([Bool]) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            var waited = 0
+            while !Database.shared.isReady && waited < 3000 {
+                usleep(50_000)
+                waited += 50
+            }
+            if !Database.shared.isReady {
+                Database.shared.ensureOpenForBackgroundWrite()
+            }
+            // For the diagnostics ("notif"): how much of the import was the database opening.
+            NotificationShare.noteFromApp("inbox: database ready after \(waited)ms")
+            let messages = entries.map { TMessage(data: $0.packed) }
+            let ids = messages.map { $0.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID, default_value: "") }
+            for (index, message) in messages.enumerated() where !ids[index].isEmpty {
+                // As saveIncomingMessageWithRetry does: recorded before the save, so a process
+                // ended mid-way still has it retried on the next return to the app.
+                PendingMessageStore.shared.save(ids[index])
+                Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
+            }
+            var stored = Set<String>()
+            let wanted = ids.filter { !$0.isEmpty }
+            if !wanted.isEmpty {
+                let list = wanted.map { "'" + $0.replacingOccurrences(of: "'", with: "''") + "'" }.joined(separator: ",")
+                Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id in (\(list))") {
+                        while cursor.next() {
+                            if let id = cursor.string(forColumnIndex: 0) {
+                                stored.insert(id)
+                            }
+                        }
+                        cursor.close()
+                    }
+                })
+            }
+            var results = [Bool](repeating: false, count: entries.count)
+            let retries = DispatchGroup()
+            for (index, entry) in entries.enumerated() {
+                let messageId = ids[index]
+                if messageId.isEmpty {
+                    // Nothing usable in it - nothing to keep it for either.
+                    results[index] = true
+                } else if stored.contains(messageId) {
+                    PendingMessageStore.shared.remove(messageId)
+                    if !entry.pushId.isEmpty {
+                        APNMessageAliasStore.shared.record(apnId: entry.pushId, storedId: messageId)
+                        PendingMessageStore.shared.remove(entry.pushId)
+                        ackAPN(id: entry.pushId)
+                    }
+                    results[index] = true
+                } else {
+                    retries.enter()
+                    saveInboxMessage(packed: entry.packed, pushId: entry.pushId) { success in
+                        results[index] = success
+                        retries.leave()
+                    }
+                }
+            }
+            if !stored.isEmpty {
+                // A notification tap may have been waiting for one of these.
+                _ = satisfyPendingNotificationOpen()
+                refreshApplicationBadge(fallbackIncrement: true)
+            }
+            retries.notify(queue: DispatchQueue.global(qos: .userInitiated)) {
+                completion(results)
+            }
+        }
+    }
+
     private static func saveIncomingMessageWithRetry(message: TMessage, messageId: String, maxAttempts: Int = 3, completion: @escaping (Bool) -> Void) {
         guard !messageId.isEmpty else {
             completion(false)
@@ -2714,7 +2822,11 @@ public class APIS: NSObject {
                         return
                     }
                     let message = TMessage(data: dataObj)
-                    
+                    // The notification extension may be asking for this same message at this same
+                    // moment and find the server already empty: it is left a copy, under the
+                    // push's id (NotificationShare.rememberDelivered).
+                    NotificationShare.rememberDelivered(message)
+
                     // simpan message
                     let messageId = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID, default_value: "")
                     guard !messageId.isEmpty else {
@@ -2754,9 +2866,6 @@ public class APIS: NSObject {
     }
     
     public static func addNotificationNexilis(_ message: TMessage) {
-        var text = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT)
-//        text = text.toNormalString()
-        text = "You got messages..."
         let nameUser = message.getBody(key: CoreMessage_TMessageKey.F_DISPLAY_NAME)
         var threadIdentifier = message.getBody(key: CoreMessage_TMessageKey.OPPOSITE_PIN)
         let scope = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID)
@@ -2769,45 +2878,20 @@ public class APIS: NSObject {
         }
         let messageId = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
         var nameSubtitle = ""
-        let imageId = CoreMessage_TMessageKey.IMAGE_ID
-        let videoId = CoreMessage_TMessageKey.VIDEO_ID
-        let fileId = CoreMessage_TMessageKey.FILE_ID
-        let audioId = CoreMessage_TMessageKey.AUDIO_ID
-        let attachmentFlag = CoreMessage_TMessageKey.ATTACHMENT_FLAG
-        let messageScopeId = CoreMessage_TMessageKey.MESSAGE_SCOPE_ID
-        let credential = CoreMessage_TMessageKey.CREDENTIAL
-        let gif_id = CoreMessage_TMessageKey.GIF_ID
-        let is_secret = CoreMessage_TMessageKey.IS_SECRET
-        if message.getBody(key: is_secret) == "1" {
-          text = "You got messages..."
-        } else if message.getBody(key: gif_id) != "" {
-          text = "Sent GIF 🎬"
-        } else if !message.getBody(key: imageId).isEmpty {
-            text = "Sent Image 📷"
-        } else if message.getBody(key: attachmentFlag) == "11" {
-            text = "Sent Sticker ❤️"
-        } else if !message.getBody(key: videoId).isEmpty {
-            text = "Sent Video 📹"
-        } else if !message.getBody(key: fileId).isEmpty {
-            if message.getBody(key: messageScopeId) == "18" {
-                text = "Sent Form 📄"
-            } else {
-                text = "Sent File 📄"
-            }
-        } else if !message.getBody(key: audioId).isEmpty {
-            text = "Sent Audio ♫"
-        } else if text.contains("Share%20location%20") {
-            text = "Sent Location 📌"
-        } else if message.getBody(key: attachmentFlag) == "27" {
-            text = "Sent Live Streaming"
-        } else if message.getBody(key: attachmentFlag) == "26" {
-            text = "Sent Seminar"
-        } else if message.getBody(key: attachmentFlag) == "25" {
-            text = "Sent Video Conference Room"
-        } else if message.getBody(key: attachmentFlag) == "24" {
-            text = "Sent Quiz"
-        } else if message.getBody(key: credential) == "1" {
-            text = "Sent Confidential Message"
+        // Fix: every banner said "You got messages..." with an attachment label at most, whatever
+        // was sent - the text was thrown away on purpose. It reads the way WhatsApp's do now: the
+        // text, or the attachment's icon and caption (see NotificationText), in the modes where
+        // the content may be shown - the same modes the Notification Service Extension shows it in.
+        let mayShowContent = !NXSecurityPolicy.requiresServerChain() && !Utils.isHSAMode()
+        let text = mayShowContent
+            ? NotificationText.body(message.mBodies, name: { MentionNames.name(forPin: $0) })
+            : NotificationText.generic
+        if text == NotificationText.generic {
+            NotificationShare.noteFromApp("…\(String(message.mStatus.suffix(6))) banner generic"
+                + " content=\(mayShowContent) chain=\(NXSecurityPolicy.requiresServerChain()) hsa=\(Utils.isHSAMode())"
+                + " secret=\(message.getBody(key: CoreMessage_TMessageKey.IS_SECRET))"
+                + " flag=\(message.getBody(key: CoreMessage_TMessageKey.ATTACHMENT_FLAG))"
+                + " text=\(message.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT).isEmpty ? 0 : 1)")
         }
         var type = "1"
         var nameTopic = "Lounge".localized()
@@ -2856,20 +2940,65 @@ public class APIS: NSObject {
         let center = UNUserNotificationCenter.current()
         let content = UNMutableNotificationContent()
         content.title = nameUser
+        content.body = text
         if type == "1" {
-            content.body = text.richText(group_id: idGroup).string
             content.subtitle = nameSubtitle
-        } else {
-            content.body = text.richText().string
         }
-        content.userInfo = ["id" : threadIdentifier, "type" : type]
-        content.sound = UNNotificationSound(named: UNNotificationSoundName("\(nameSound).mp3"))
+        content.threadIdentifier = threadIdentifier
+        var info: [String: String] = ["id" : threadIdentifier, "type" : type]
+        // Answerable from the banner itself, as the extension's notifications are - not for a Call
+        // Center chat, and not where the content may not be shown.
+        if mayShowContent, message.getBody(key: CoreMessage_TMessageKey.IS_CALL_CENTER) != "1" {
+            let target = NotificationShare.replyTarget(personal: type == "0",
+                                                       senderPin: message.getBody(key: CoreMessage_TMessageKey.F_PIN),
+                                                       groupId: idGroup.isEmpty ? threadIdentifier : idGroup,
+                                                       chatId: idGroup.isEmpty || idGroup == threadIdentifier ? "" : threadIdentifier)
+            info.merge(target) { $1 }
+            content.categoryIdentifier = NotificationShare.replyCategory
+        }
+        content.userInfo = info
+        // A notification only plays .caf/.aiff/.wav - the .mp3 named here before fell back to the
+        // system sound. The converted copy the extension uses is used here too.
+        if let published = NotificationShare.publishedSound(personal: type == "0") {
+            content.sound = UNNotificationSound(named: UNNotificationSoundName(published))
+        } else {
+            content.sound = UNNotificationSound(named: UNNotificationSoundName("\(nameSound).mp3"))
+        }
         // Fix: the badge travels with the notification. Set this way iOS applies it when the
         // banner is delivered, so it no longer depends on this process still being awake to run
         // some later block - which is what made the badge "sometimes" not move at all.
         let badge = badgeTargetForNewMessage()
         content.badge = NSNumber(value: badge)
-        let request = UNNotificationRequest(identifier: localBannerIdentifier(for: messageId), content: content, trigger: nil)
+        // The sender's picture in place of the app's icon, as the extension's notifications have it -
+        // a banner of this app's own looked different beside them.
+        let shown = NotificationShare.asMessageFromPerson(content,
+                                                          senderPin: message.getBody(key: CoreMessage_TMessageKey.F_PIN),
+                                                          senderName: nameUser,
+                                                          myPin: User.getMyPin() ?? "",
+                                                          thread: threadIdentifier,
+                                                          groupTitle: type == "1" ? nameSubtitle : "",
+                                                          groupId: idGroup)
+        let request = UNNotificationRequest(identifier: localBannerIdentifier(for: messageId), content: shown, trigger: nil)
+        // An edit takes the place of the message's notification, whichever put it up - this app or
+        // the notification extension - with the new text, no sound and no count of its own. With
+        // nothing up for the message (read, or cleared) nothing is put up: as on Android, an edit
+        // is not a new message. Only the edit itself (EDIT_MESSAGE) - a message that was edited
+        // before it got here is still new.
+        if message.mCode == CoreMessage_TMessageCode.EDIT_MESSAGE {
+            center.getDeliveredNotifications { delivered in
+                let up = delivered.filter { note in
+                    note.request.identifier == request.identifier
+                        || (note.request.content.userInfo["nx_message_id"] as? String) == messageId
+                }.map { $0.request.identifier }
+                guard !up.isEmpty else { return }
+                center.removeDeliveredNotifications(withIdentifiers: up.filter { $0 != request.identifier })
+                guard let quiet = shown.mutableCopy() as? UNMutableNotificationContent else { return }
+                quiet.sound = nil
+                quiet.badge = nil
+                center.add(UNNotificationRequest(identifier: request.identifier, content: quiet, trigger: nil))
+            }
+            return
+        }
         // Fix: the server sends two pushes for every message - an alert one, which iOS shows by
         // itself, and a silent one carrying the message to be saved. This banner was put up for
         // the second of those, so the reader saw the same message announced twice. It is only put
@@ -2886,23 +3015,95 @@ public class APIS: NSObject {
         // message in, and each used to ask separately. And the alert arriving late is no longer
         // final: it is caught when it lands, and the banner this put up is taken down again - see
         // withdrawLocalBannersAnnouncedBySystem.
+        // The Notification Service Extension has already announced this message from its push:
+        // a banner here would be the second, and the count already went up with it.
+        if NotificationShare.wasAnnouncedByPush(messageId) {
+            setApplicationBadge(max(Int(readUnreadTotal() ?? 0), NotificationShare.sharedBadge))
+            return
+        }
         guard claimLocalBanner(for: messageId) else {
             setApplicationBadge(badge)
             return
         }
-        systemAlreadyAnnounced(messageId: messageId, from: nameUser) { announced in
-            guard !announced else {
-                return
-            }
+        NotificationShare.markAnnouncedLocally(messageId)
+        // The push for this message carries the message's header id as its message_id - the one
+        // the notification extension's own notification can be found by.
+        let pushId = message.mStatus
+        func putUp() {
             center.add(request) { error in
                 if let error = error {
                     print("Error scheduling notification: \(error.localizedDescription)")
+                }
+            }
+            // The push's own notification may still be on its way, and come up as "You got
+            // messages..." if the extension could not word it: it is taken down when it lands.
+            for delay in [4.0, 10.0] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    removeGenericPushNotification(pushId: pushId, messageId: messageId) { _ in }
+                }
+            }
+        }
+        // Fix: when the extension could not word the push (it was ended mid-way) the system showed
+        // "You got messages..." - and this banner went up beside it: three notifications for two
+        // messages. The push's notification is looked at first: a worded one means this banner is
+        // not needed; a bare one is taken down and this banner stands in its place.
+        removeGenericPushNotification(pushId: pushId, messageId: messageId) { outcome in
+            switch outcome {
+            case .worded:
+                return
+            case .removedGeneric:
+                putUp()
+            case .none:
+                systemAlreadyAnnounced(messageId: messageId, from: nameUser) { announced in
+                    guard !announced else {
+                        return
+                    }
+                    putUp()
                 }
             }
         }
         // And straight away as well, for the case where the banner is suppressed (the reader is
         // already in the app) but the count still went up.
         setApplicationBadge(badge)
+    }
+
+    enum PushNotificationOutcome {
+        /// The extension's worded notification for this message is up.
+        case worded
+        /// The bare "You got messages..." for it was up, and has been taken down.
+        case removedGeneric
+        /// Nothing for it is up.
+        case none
+    }
+
+    /// Looks for the push's notification for one message: the extension's worded one (it carries
+    /// nx_message_id), or the bare one the system shows when the extension could not run (it
+    /// carries only the push's message_id) - which is taken down.
+    static func removeGenericPushNotification(pushId: String, messageId: String,
+                                              completion: @escaping (PushNotificationOutcome) -> Void) {
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { delivered in
+            var outcome = PushNotificationOutcome.none
+            var bare: [String] = []
+            for note in delivered {
+                let info = note.request.content.userInfo
+                let worded = info["nx_message_id"] as? String ?? ""
+                if !messageId.isEmpty, worded == messageId {
+                    outcome = .worded
+                } else if !pushId.isEmpty, worded.isEmpty, (info["message_id"] as? String) == pushId {
+                    bare.append(note.request.identifier)
+                }
+            }
+            if !bare.isEmpty {
+                center.removeDeliveredNotifications(withIdentifiers: bare)
+                if outcome != .worded {
+                    outcome = .removedGeneric
+                }
+            }
+            DispatchQueue.main.async {
+                completion(outcome)
+            }
+        }
     }
 
     /// The identifier a banner this app puts up is filed under - distinct from the message id, so
@@ -3061,7 +3262,25 @@ public class APIS: NSObject {
         }
     }
     
-    private static func copySoundToLocalPath(_ nameSound: String, _ fromPref: Bool) {
+    /// The sound a notification setting ("001:Nexilis Message (Default)") names: the file's base
+    /// name, and whether it is the one downloaded from the server's preferences rather than one
+    /// that ships with the app.
+    public static func notificationSoundName(for soundId: String) -> (name: String, fromPref: Bool) {
+        var nameSound = soundId.component(1, separatedBy: ":").replacingOccurrences(of: " ", with: "_")
+        var fromPref = false
+        if nameSound.contains("_(Default)") {
+            if !Utils.getDefaultIncomingMsg().isEmpty {
+                nameSound = Utils.getDefaultIncomingMsg()
+                fromPref = true
+            } else {
+                nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
+            }
+        }
+        return (nameSound, fromPref)
+    }
+
+    /// Where the audio of a notification sound is - downloaded, decrypted to caches, or shipped.
+    static func notificationSoundSource(_ nameSound: String, _ fromPref: Bool) -> URL? {
         var sourceURL: URL?
         if fromPref {
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
@@ -3099,6 +3318,11 @@ public class APIS: NSObject {
                 sourceURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
             }
         }
+        return sourceURL
+    }
+
+    private static func copySoundToLocalPath(_ nameSound: String, _ fromPref: Bool) {
+        let sourceURL = notificationSoundSource(nameSound, fromPref)
         if sourceURL == nil {
             return
         }
@@ -3314,6 +3538,25 @@ public class APIS: NSObject {
     // arrive from the pull, from the reconciliation loop, or from the socket once it
     // reconnects - only the first of those can report back directly, so the other two are
     // covered by simply looking again.
+    /// A conversation a notification tap asked for before the app was up - opened by the watchdog.
+    private static var pendingConversationOpen: (thread: String, type: String)?
+    /// The conversation just opened from a notification, and when - its message arriving over the
+    /// socket a moment later is not announced with an in-app banner (InAppBanner).
+    static var notificationOpening: (thread: String, at: Date)?
+
+    /// Opens a conversation for a notification tap, as a banner of the app's own opens it.
+    private static func openConversationFromNotification(_ thread: String, _ type: String) {
+        if isShowingConversation(thread) {
+            reloadChatListThenOpen { }
+        } else {
+            clearShowingEditor {
+                reloadChatListThenOpen {
+                    showEditorOrCallFromAPN(thread, type, "CL01")
+                }
+            }
+        }
+    }
+
     private static var pendingOpenWatchdog: Timer?
     private static var pendingOpenAttemptsLeft = 0
     private static func startPendingOpenWatchdog() {
@@ -3333,8 +3576,16 @@ public class APIS: NSObject {
                 }
                 // A backgrounded app can't present anything; the store keeps the request and
                 // enterForeground() picks it up again.
+                // Fix: a cold launch from a notification is not active yet on the first tick, and the
+                // watchdog stopped there for good - the chat never opened. It waits instead.
                 if checkAppStateisBackground() {
+                    return
+                }
+                if let pending = pendingConversationOpen {
+                    pendingConversationOpen = nil
+                    APNPendingOpenStore.shared.clear()
                     stopPendingOpenWatchdog()
+                    openConversationFromNotification(pending.thread, pending.type)
                     return
                 }
                 _ = satisfyPendingNotificationOpen()
@@ -3413,15 +3664,29 @@ public class APIS: NSObject {
                 }
             } else {
                 let userInfo = response.notification.request.content.userInfo
-                DispatchQueue.main.async {
+                // The message the notification showed is in the extension's inbox: it is saved
+                // first, so the chat it is looked up in already holds it.
+                NotificationShare.importInbox {
                     if let message_id = userInfo["message_id"] as? String {
-                        // Fix: check the fast path first (message already saved - the common
-                        // case), and only fall back to an active network pull if it's genuinely
-                        // missing, so tapping a notification that was already processed normally
-                        // doesn't pay for an extra round trip.
-                        // The push's id first, then whatever a previous pull for it resolved
-                        // to - a message pulled earlier is on disk under that one.
-                        let localMessageId = APNMessageAliasStore.shared.storedId(forAPNId: message_id) ?? message_id
+                        // Fix: the push's message_id is the server's delivery id, not the message's.
+                        // The two were tied together only when a pull for that very push saved the
+                        // message - so of three notifications from one group, the newest (just
+                        // pulled) opened its chat, and an older one, whose message had come in over
+                        // the socket instead, was looked up under an id nothing is stored under, then
+                        // pulled again from a server that had already handed it over - and no chat
+                        // opened at all. The Notification Service Extension writes the message's own
+                        // id (nx_message_id) and its conversation (nx_thread, nx_type) into every
+                        // notification it words: those are asked first.
+                        let realId = userInfo["nx_message_id"] as? String ?? ""
+                        let thread = userInfo["nx_thread"] as? String ?? ""
+                        let threadType = userInfo["nx_type"] as? String ?? ""
+                        if !realId.isEmpty {
+                            APNMessageAliasStore.shared.record(apnId: message_id, storedId: realId)
+                        }
+                        // The message's own id where the extension gave it; otherwise the push's id,
+                        // then whatever a previous pull for it resolved to.
+                        let localMessageId = !realId.isEmpty ? realId
+                            : (APNMessageAliasStore.shared.storedId(forAPNId: message_id) ?? message_id)
                         Database.shared.ensureOpenForBackgroundWrite()
                         var alreadyExists = false
                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
@@ -3430,6 +3695,29 @@ public class APIS: NSObject {
                                 cursor.close()
                             }
                         })
+                        // Not saved yet, but the conversation is known: it is opened straight away,
+                        // as a banner of the app's own opens it, and the message joins it when it
+                        // lands.
+                        if !alreadyExists, !thread.isEmpty, threadType == "0" || threadType == "1" {
+                            PendingMessageStore.shared.save(message_id)
+                            startPendingMessageReconciliationLoop()
+                            // The message about to arrive over the socket is the one being opened:
+                            // it does not need announcing again on top of the chat.
+                            notificationOpening = (thread, Date())
+                            if !checkAppStateisBackground() {
+                                openConversationFromNotification(thread, threadType)
+                            } else {
+                                // Fix: a tap that launched the app arrives before the app is active,
+                                // and this path was skipped - so the chat was looked for under the
+                                // push's delivery id, which nothing is ever saved under, and the app
+                                // simply opened on its list. The conversation is opened as soon as
+                                // the app is up instead.
+                                pendingConversationOpen = (thread, threadType)
+                                APNPendingOpenStore.shared.record(apnId: message_id)
+                                startPendingOpenWatchdog()
+                            }
+                            return
+                        }
                         if alreadyExists {
                             if !openChatForLocalMessage(localMessageId) {
                                 // The row is there but the chat couldn't be presented yet (the
@@ -3688,6 +3976,9 @@ public class APIS: NSObject {
     }
     
     public static func enterBackground() {
+        // What the Notification Service Extension reads, brought up to date before the app goes
+        // quiet - names, sounds, the account it pulls as, and the mode that says whether it may.
+        NotificationShare.refresh()
 //        if !API.bAVisOngoing() {
 //            API.deinitConnection()
 //        }
@@ -3864,6 +4155,13 @@ public class APIS: NSObject {
     }
 
     public static func enterForeground() {
+        // Before anything takes the tray down: any bare "You got messages..." in it is noted for
+        // the diagnostics ("notif").
+        NotificationShare.noteGenericNotifications()
+        NotificationShare.refresh()
+        // What the notification extension pulled while the app was away goes into the database
+        // first - before the socket brings the same messages in again as if they were new.
+        NotificationShare.importInbox()
         // Called first, and given a fresh budget of attempts: every time the app comes to the
         // front is a new chance for something shared to be waiting, whether or not the last window
         // of looking ran out. It costs nothing here - checkDataForShareExtension does its own work
@@ -5500,7 +5798,7 @@ public final class VersionDiagnostics {
         alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak alert, weak host] _ in
             guard let host, let value = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespaces),
                   let answer = VersionDiagnostics.answer(to: value) else { return }
-            host.view.presentToast(answer, duration: 3.5)
+            host.view.presentToast(answer, duration: ["notif", "conn"].contains(value.lowercased()) ? 20 : 3.5)
         })
         host.present(alert, animated: true)
     }
@@ -5523,6 +5821,14 @@ public final class VersionDiagnostics {
             return Utils.getConnectionID()
         case "domain":
             return Utils.getDomainOpr()
+        case "notif":
+            // What the notification extension noted - why a picture did not come, for one.
+            NotificationShare.noteGenericNotifications()
+            return NotificationShare.diagnostics
+        case "conn":
+            // The messaging link's watch: how long it has been down, what is stopping a rebuild,
+            // and what it last did.
+            return ConnectionWatch.shared.diagnostics
         default:
             return nil
         }

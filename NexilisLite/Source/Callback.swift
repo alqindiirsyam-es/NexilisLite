@@ -186,6 +186,25 @@ final class ConnectionWatch {
     private var lastRebuild: Date?
     private var isRebuilding = false
     private static let firstRebuildAfter: TimeInterval = 10
+    /// The interface the phone's route goes over (Wi-Fi, cellular, ...), and when it last changed.
+    private var lastInterface = ""
+    private var interfaceChangedAt: Date?
+    /// Quick rebuilds already tried since the interface changed - see quickRebuildSchedule.
+    private var quickRebuilds = 0
+    /// Seconds after an interface change at which the link is rebuilt if it is still down. Read off
+    /// a test (airplane mode on and off): a rebuild one second after Wi-Fi came back was too early -
+    /// the route was not ready yet - and the next waited out a doubled backoff, twenty seconds in
+    /// all. A few closer tries cover the time a new route takes to settle.
+    private static let quickRebuildSchedule: [TimeInterval] = [3, 6, 10]
+    /// Rebuilds in a row that did not bring the link back - after a few, the next goes deeper.
+    private var failedRebuilds = 0
+    private var lastRebuildKind = ""
+    private var lastProbeTarget = ""
+    /// What the watch did lately, for the Version diagnostics box ("conn").
+    private var history: [String] = []
+    /// Whether what the notification extension reads has been written since the link first came
+    /// up in this run of the app - see the link-up branch of tick.
+    private var sharedSinceLaunch = false
     private let rebuildQueue = DispatchQueue(label: "io.nexilis.connectionWatch.rebuild", qos: .utility)
     private lazy var probeSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -221,6 +240,24 @@ final class ConnectionWatch {
                 guard let self = self else { return }
                 let wasSatisfied = self.pathSatisfied
                 self.pathSatisfied = path.status == .satisfied
+                // Fix: going from Wi-Fi to cellular (or back) need not pass through "no route" -
+                // iOS can move straight over - so the watch never knew, and the SDK's socket stayed
+                // tied to an interface that was gone while the rebuild waited out a backoff that
+                // had grown to a minute. The interface itself is watched now.
+                let interface = ConnectionWatch.interfaceName(of: path)
+                if self.pathSatisfied, !self.lastInterface.isEmpty, interface != self.lastInterface {
+                    self.interfaceChangedAt = Date()
+                    self.quickRebuilds = 0
+                    self.rebuildAfter = ConnectionWatch.firstRebuildAfter
+                    self.lastRebuild = nil
+                    self.failedRebuilds = 0
+                    self.internetAnswers = false
+                    self.lastProbe = nil
+                    self.note("interface \(self.lastInterface) -> \(interface)")
+                }
+                if self.pathSatisfied {
+                    self.lastInterface = interface
+                }
                 if self.pathSatisfied {
                     self.pathDownSince = nil
                     // Online again: reading is allowed again straight away, as Android does on
@@ -279,8 +316,33 @@ final class ConnectionWatch {
             closeConversationsWhileBlocked()
             return
         }
+        // Fix: a rebuild that never came back (the SDK's own deinit or init not returning) left
+        // isRebuilding set for good, and no rebuild ever ran again until the app was killed. One
+        // that has taken thirty seconds has failed.
+        if isRebuilding, let started = lastRebuild, Date().timeIntervalSince(started) > 30 {
+            isRebuilding = false
+            note("rebuild did not return in 30s")
+        }
         if API.nGetCLXConnState() == 1 {
+            if sdkDownSince != nil, !lastRebuildKind.isEmpty {
+                note("link up after \(lastRebuildKind) rebuild")
+            }
             sdkDownSince = nil
+            failedRebuilds = 0
+            lastRebuildKind = ""
+            interfaceChangedAt = nil
+            quickRebuilds = 0
+            // The first time the link is up in this run of the app the account, the mode and the
+            // names are all settled: what the notification extension reads is written then, rather
+            // than only when the app next goes to the background - right after an update, the push
+            // that came before that moment had nothing to go on.
+            if !sharedSinceLaunch {
+                sharedSinceLaunch = true
+                NotificationShare.refresh()
+                // A cold launch has no enterForeground: the inbox is emptied here, once the
+                // database is certainly open.
+                NotificationShare.importInbox()
+            }
             endOfflineBlock()
             reopenDatabaseIfNeeded()
             rebuildAfter = ConnectionWatch.firstRebuildAfter
@@ -304,14 +366,71 @@ final class ConnectionWatch {
             endOfflineBlock()
         }
         closeConversationsWhileBlocked()
-        guard internetAnswers, downFor >= rebuildAfter, !isRebuilding, !Nexilis.sAPIKey.isEmpty,
-              !API.bAVisOngoing() else {
+        // Right after the phone changed interface the link is rebuilt on a short schedule of its own
+        // (quickRebuildSchedule) rather than the backoff: the old socket is tied to an interface
+        // that is gone, and the new route takes a few seconds to be usable.
+        var justChangedInterface = false
+        if interfaceChangedAt != nil {
+            if quickRebuilds < ConnectionWatch.quickRebuildSchedule.count {
+                justChangedInterface = true
+            } else {
+                // The quick tries are spent; the ordinary backoff takes over from its start.
+                interfaceChangedAt = nil
+                rebuildAfter = ConnectionWatch.firstRebuildAfter
+                lastRebuild = Date()
+            }
+        }
+        let sinceChange = interfaceChangedAt.map { Date().timeIntervalSince($0) } ?? 0
+        let due = justChangedInterface
+            ? sinceChange >= ConnectionWatch.quickRebuildSchedule[quickRebuilds] && downFor >= 1
+            : downFor >= rebuildAfter
+        // Fix: the SDK's "a call is going on" could stay set after a call had ended, and every
+        // rebuild was refused for as long as it did. A call holds the link only while one of the
+        // app's own call screens is actually up.
+        let inCall = API.bAVisOngoing() && APIS.isCallInProgress
+        guard internetAnswers, due, !isRebuilding, !Nexilis.sAPIKey.isEmpty, !inCall else {
             return
         }
-        if let last = lastRebuild, Date().timeIntervalSince(last) < rebuildAfter {
+        if !justChangedInterface, let last = lastRebuild, Date().timeIntervalSince(last) < rebuildAfter {
             return
         }
-        rebuildLink()
+        if justChangedInterface {
+            quickRebuilds += 1
+        }
+        rebuildLink(quick: justChangedInterface)
+    }
+
+    // MARK: - Diagnostics
+
+    private func note(_ text: String) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        history.append(formatter.string(from: Date()) + " " + text)
+        if history.count > 12 {
+            history.removeFirst(history.count - 12)
+        }
+        NXLogger.general.publicInfo("[Connect] \(text)")
+    }
+
+    /// The watch's state as it stands - for the Version diagnostics box ("conn").
+    var diagnostics: String {
+        let down = sdkDownSince.map { "\(Int(Date().timeIntervalSince($0)))s" } ?? "-"
+        var lines = [
+            "clx=\(API.nGetCLXConnState() ?? 0) down=\(down) path=\(pathSatisfied ? lastInterface : "none")",
+            "inet=\(internetAnswers) via=\(lastProbeTarget) rebuilding=\(isRebuilding)",
+            "next=\(Int(rebuildAfter))s failed=\(failedRebuilds) avCall=\(API.bAVisOngoing()) callUI=\(APIS.isCallInProgress)",
+            "apikey=\(!Nexilis.sAPIKey.isEmpty) addr=\(Utils.getIpOpr())"
+        ]
+        lines.append(contentsOf: history.suffix(6))
+        return lines.joined(separator: "\n")
+    }
+
+    private static func interfaceName(of path: NWPath) -> String {
+        if path.usesInterfaceType(.wifi) { return "wifi" }
+        if path.usesInterfaceType(.cellular) { return "cellular" }
+        if path.usesInterfaceType(.wiredEthernet) { return "wired" }
+        if path.usesInterfaceType(.other) { return "other" }
+        return "unknown"
     }
 
     // MARK: - Offline, where the keys are never kept on the device
@@ -559,7 +678,10 @@ final class ConnectionWatch {
         if let last = lastProbe, Date().timeIntervalSince(last) < 5 {
             return
         }
-        guard CheckConnection.isConnectedToNetwork(), let url = URL(string: "https://www.google.com/generate_204") else {
+        // Fix: this first asked SCNetworkReachability, which can answer "not connected" for a while
+        // after the phone moves between Wi-Fi and cellular - and a "no" here meant no rebuild at
+        // all. The phone's route (NWPathMonitor) and an actual request are what decide now.
+        guard pathSatisfied, let url = URL(string: "https://www.google.com/generate_204") else {
             internetAnswers = false
             return
         }
@@ -569,25 +691,73 @@ final class ConnectionWatch {
         request.httpMethod = "HEAD"
         probeSession.dataTask(with: request) { [weak self] _, response, error in
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let answered = error == nil && (200..<400).contains(status)
             DispatchQueue.main.async {
-                self?.internetAnswers = error == nil && (200..<400).contains(status)
-                self?.lastProbeAnswered = Date()
-                self?.isProbing = false
+                guard let self = self else { return }
+                if answered {
+                    self.finishProbe(true, via: "google")
+                } else {
+                    // Some networks block or bend that address; our own server answering at all
+                    // is proof enough that there is internet to rebuild the link over.
+                    self.probeOwnServer()
+                }
             }
         }.resume()
     }
 
+    private func probeOwnServer() {
+        guard let url = URL(string: Utils.getDomainOpr()) else {
+            finishProbe(false, via: "none")
+            return
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        probeSession.dataTask(with: request) { [weak self] _, response, error in
+            let answered = error == nil && response is HTTPURLResponse
+            DispatchQueue.main.async {
+                self?.finishProbe(answered, via: answered ? "server" : "none")
+            }
+        }.resume()
+    }
+
+    private func finishProbe(_ answered: Bool, via target: String) {
+        internetAnswers = answered
+        lastProbeTarget = target
+        lastProbeAnswered = Date()
+        isProbing = false
+    }
+
     /// Takes the SDK's link down and brings it up again - what a trip to the background and back
     /// amounts to, without the reader having to make it.
-    private func rebuildLink() {
+    private func rebuildLink(quick: Bool = false) {
         isRebuilding = true
+        // A rebuild that came round again with the link still down did not work.
+        if !lastRebuildKind.isEmpty {
+            failedRebuilds += 1
+        }
         lastRebuild = Date()
-        rebuildAfter = min(rebuildAfter * 2, 60)
-        NXLogger.general.publicInfo("[Connect] CLX terputus sementara internet tersedia - koneksi dibangun ulang")
+        // A quick try after an interface change does not grow the backoff.
+        if !quick {
+            rebuildAfter = min(rebuildAfter * 2, 60)
+        }
+        // Fix: after a few plain rebuilds that did not bring the link back, only killing the app
+        // did. The deeper one is what a fresh start does short of signing in again: the link let
+        // go of and given a moment, the server's address and the session cookies fetched again
+        // with no cache in between, and the link opened from nothing.
+        let deep = failedRebuilds >= 2
+        lastRebuildKind = deep ? "deep" : "plain"
+        note("rebuild \(lastRebuildKind)\(quick ? " quick \(quickRebuilds)" : "") (failed so far \(failedRebuilds))")
         rebuildQueue.async { [weak self] in
             API.deinitConnection()
+            if deep {
+                Thread.sleep(forTimeInterval: 1.5)
+                _ = Nexilis.getAddressNew(apiKey: Nexilis.sAPIKey, fresh: true)
+            }
             Nexilis.hasInit = false
             _ = Nexilis.justInit(isChecking: true)
+            // The session cookies may have just been renewed - the notification extension asks the
+            // server with them too.
+            NotificationShare.refreshCredentials()
             DispatchQueue.main.async {
                 self?.isRebuilding = false
             }

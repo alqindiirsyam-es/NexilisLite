@@ -15,6 +15,7 @@ import CommonCrypto
 import CoreImage
 import ZIPFoundation
 import PDFKit
+import QuickLook
 import ObjectiveC
 import CoreLocation
 import CoreTelephony
@@ -734,6 +735,9 @@ extension NSObject {
     }
     
     public func deleteAllRecordDatabase() {
+        // The account whose messages these were is gone: nothing of it is left for the
+        // notification extension either - its credentials, names, inbox and badge.
+        NotificationShare.clear()
         Database.shared.database?.inTransaction({ fmdb, rollback in
             do {
                 _ = Database.shared.deleteRecord(fmdb: fmdb, table: "BUDDY", _where: "")
@@ -3326,5 +3330,94 @@ public final class DateFormatterPool {
             formatters[key] = formatter
         }
         return formatter.string(from: date)
+    }
+}
+
+// MARK: - Office previews
+
+/// Office documents the system's previewer cannot show as they are, made showable.
+///
+/// QLPreviewController renders Office files with Apple's own engine, which is stricter than
+/// PowerPoint: a presentation saved by LibreOffice leaves the colour mapping (p:clrMapOvr) out of
+/// its speaker notes, and the whole file then will not open - in the Editor, and in the Mac's Quick
+/// Look alike - although PowerPoint opens it. A copy with the mapping put back ("as the master",
+/// what PowerPoint takes it to be) is previewed in its place. The file itself is left as it is.
+public enum OfficePreview {
+
+    private static let lock = NSLock()
+    /// What was made for a file - by its path, size and date - and nil where nothing needed doing.
+    private static var prepared: [String: URL?] = [:]
+
+    private static let presentationTypes: Set<String> = ["pptx", "ppsx", "potx", "pptm", "ppsm"]
+
+    /// The item to preview in place of this one: a mended copy where the file needs one, the item
+    /// itself otherwise.
+    public static func item(_ item: QLPreviewItem) -> QLPreviewItem {
+        guard let url = item.previewItemURL, url.isFileURL,
+              presentationTypes.contains(url.pathExtension.lowercased()),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+            return item
+        }
+        let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+        let date = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let key = "\(url.path)|\(size)|\(date)"
+        lock.lock()
+        if let known = prepared[key] {
+            lock.unlock()
+            return known.map { $0 as NSURL } ?? item
+        }
+        lock.unlock()
+        let mended = mendedPresentation(url)
+        lock.lock()
+        prepared[key] = mended
+        lock.unlock()
+        return mended.map { $0 as NSURL } ?? item
+    }
+
+    /// A copy of the presentation with p:clrMapOvr put into every slide, layout and notes page
+    /// without one - nil when none lacks it, or the file cannot be read as a presentation.
+    private static func mendedPresentation(_ url: URL) -> URL? {
+        guard let source = try? Archive(url: url, accessMode: .read) else { return nil }
+        let mapping = "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>"
+        var mended: [(path: String, data: Data)] = []
+        for entry in source where entry.type == .file {
+            let path = entry.path
+            guard path.hasPrefix("ppt/notesSlides/") || path.hasPrefix("ppt/slides/") || path.hasPrefix("ppt/slideLayouts/"),
+                  path.hasSuffix(".xml"), !path.contains("/_rels/") else { continue }
+            var data = Data()
+            guard (try? source.extract(entry, consumer: { data.append($0) })) != nil,
+                  let xml = String(data: data, encoding: .utf8),
+                  !xml.contains("<p:clrMapOvr"), xml.contains("xmlns:a="),
+                  let end = xml.range(of: "</p:cSld>") else { continue }
+            var fixed = xml
+            fixed.insert(contentsOf: mapping, at: end.upperBound)
+            mended.append((path, Data(fixed.utf8)))
+        }
+        guard !mended.isEmpty else { return nil }
+        // The same name, so the preview's title is the file's.
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OfficePreview", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let copy = folder.appendingPathComponent(url.lastPathComponent)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: url, to: copy)
+            let archive = try Archive(url: copy, accessMode: .update)
+            for part in mended {
+                if let old = archive[part.path] {
+                    try archive.remove(old)
+                }
+                let data = part.data
+                try archive.addEntry(with: part.path, type: .file, uncompressedSize: Int64(data.count),
+                                     compressionMethod: .deflate) { position, size in
+                    let start = Int(position)
+                    return data.subdata(in: start..<min(start + size, data.count))
+                }
+            }
+            return copy
+        } catch {
+            try? FileManager.default.removeItem(at: folder)
+            return nil
+        }
     }
 }

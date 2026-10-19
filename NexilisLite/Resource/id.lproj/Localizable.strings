@@ -539,3 +539,12 @@
 "You cannot open a chat when you're offline. The conversation will automatically close in 5 seconds." = "Anda tidak dapat membuka chat saat offline. Percakapan akan tertutup otomatis dalam 5 detik.";
 "Invalid App State!" = "Status Aplikasi Tidak Valid!";
 "Please re-open app again, the application will automatically stop. To try again, please use stable connection!" = "Silakan buka ulang aplikasi, aplikasi akan berhenti otomatis. Untuk mencoba lagi, gunakan koneksi yang stabil!";
+"1 page" = "1 halaman";
+"%d pages" = "%d halaman";
+"Download failed. Please try again." = "Unduhan gagal. Silakan coba lagi.";
+"Download" = "Unduh";
+"Share" = "Bagikan";
+"Open link" = "Buka tautan";
+"View message" = "Lihat pesan";
+"Unstarred" = "Favorit dihapus";
+"Download the files first to share them." = "Unduh file terlebih dahulu untuk membagikannya.";

@@ -6,6 +6,9 @@
 //
 
 import Foundation
+import CryptoKit
+import Security
+import SystemConfiguration
 
 /// A row of the chat list: who it is with, and the last thing said.
 ///
@@ -560,4 +563,210 @@ public class Chat: Model {
         return chats
     }
     
+}
+
+// MARK: - The chat list as it was last shown
+
+/// The chat list as it was last on screen, kept so a cold launch can show it at once.
+///
+/// Opened from the launcher after the app had been ended, the list had nothing to show until the
+/// database was open again and its first read was done - "Loading Data...", then the list, where
+/// WhatsApp shows the list straight away. What was last on screen is kept here and shown first;
+/// the real read replaces it a moment later, row by row.
+///
+/// It holds names and the last message of every conversation, so it is sealed: AES-GCM with a key
+/// of its own in the keychain, kept on this device and readable only while it is unlocked, in a
+/// file under complete protection. It is only for the account that wrote it, shown nowhere reading
+/// is not allowed (OfflinePolicy), and gone with the account (NotificationShare.clear).
+public enum ChatListSnapshot {
+
+    public struct Content {
+        public let chats: [Chat]
+        public let groupMaps: [String: [Chat]]
+        public let archived: [Chat]
+        public let maxArchived: [String: [String]]
+        public let senderNames: [String: String]
+
+        public init(chats: [Chat], groupMaps: [String: [Chat]], archived: [Chat],
+                    maxArchived: [String: [String]], senderNames: [String: String]) {
+            self.chats = chats
+            self.groupMaps = groupMaps
+            self.archived = archived
+            self.maxArchived = maxArchived
+            self.senderNames = senderNames
+        }
+    }
+
+    private static let queue = DispatchQueue(label: "io.nexilis.chatlist.snapshot", qos: .utility)
+    /// The write waiting for a burst to settle, per list. Main thread only.
+    private static var pendingWrites: [String: DispatchWorkItem] = [:]
+    private static let keychainService = "io.nexilis.chatlist"
+    private static let keychainAccount = "snapshot"
+
+    /// Keeps the list as it is now - a second after the last change, so a burst is written once.
+    /// Called on the main thread, where the rows are changed.
+    public static func save(_ list: String, content: Content) {
+        guard let me = User.getMyPin(), !me.isEmpty, !OfflinePolicy.isBlocking, !content.chats.isEmpty else {
+            return
+        }
+        // Taken now, on this thread: the rows go on changing after this returns.
+        let plist: [String: Any] = [
+            "version": 1,
+            "me": me,
+            "chats": content.chats.map { $0.snapshotFields },
+            "groups": content.groupMaps.mapValues { $0.map { $0.snapshotFields } },
+            "archived": content.archived.map { $0.snapshotFields },
+            "maxArchived": content.maxArchived,
+            "names": content.senderNames
+        ]
+        pendingWrites[list]?.cancel()
+        let work = DispatchWorkItem {
+            write(plist, to: list)
+        }
+        pendingWrites[list] = work
+        queue.asyncAfter(deadline: .now() + 1, execute: work)
+    }
+
+    /// The list last kept for this account, where it may be shown.
+    public static func load(_ list: String) -> Content? {
+        guard let me = User.getMyPin(), !me.isEmpty, mayShow,
+              let key = key(creating: false),
+              let sealed = try? Data(contentsOf: file(list)),
+              let box = try? AES.GCM.SealedBox(combined: sealed),
+              let plain = try? AES.GCM.open(box, using: key),
+              let plist = (try? PropertyListSerialization.propertyList(from: plain, options: [], format: nil)) as? [String: Any],
+              plist["me"] as? String == me else {
+            return nil
+        }
+        func rows(_ value: Any?) -> [Chat] {
+            return (value as? [[String: Any]] ?? []).map { Chat.fromSnapshot($0) }
+        }
+        let chats = rows(plist["chats"])
+        guard !chats.isEmpty else { return nil }
+        return Content(chats: chats,
+                       groupMaps: (plist["groups"] as? [String: Any] ?? [:]).mapValues { rows($0) },
+                       archived: rows(plist["archived"]),
+                       maxArchived: plist["maxArchived"] as? [String: [String]] ?? [:],
+                       senderNames: plist["names"] as? [String: String] ?? [:])
+    }
+
+    /// Every list kept, and its key - when the account goes.
+    public static func clear() {
+        // A write still waiting would put back what is being taken away.
+        DispatchQueue.main.async {
+            pendingWrites.values.forEach { $0.cancel() }
+            pendingWrites.removeAll()
+        }
+        queue.async {
+            try? FileManager.default.removeItem(at: folder)
+            SecItemDelete(keyQuery() as CFDictionary)
+        }
+    }
+
+    /// Not while reading is blocked; and where offline means no reading, not without a network to
+    /// be online on - the block itself is only decided a moment after launch.
+    private static var mayShow: Bool {
+        if OfflinePolicy.isBlocking {
+            return false
+        }
+        if OfflinePolicy.applies && !hasRoute {
+            return false
+        }
+        return true
+    }
+
+    private static var hasRoute: Bool {
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        guard let reachability = withUnsafePointer(to: &address, {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                SCNetworkReachabilityCreateWithAddress(nil, $0)
+            }
+        }) else {
+            return false
+        }
+        var flags = SCNetworkReachabilityFlags()
+        guard SCNetworkReachabilityGetFlags(reachability, &flags) else {
+            return false
+        }
+        return flags.contains(.reachable) && !flags.contains(.connectionRequired)
+    }
+
+    private static var folder: URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return support.appendingPathComponent("ChatListSnapshot", isDirectory: true)
+    }
+
+    private static func file(_ list: String) -> URL {
+        return folder.appendingPathComponent(list + ".snapshot")
+    }
+
+    private static func write(_ plist: [String: Any], to list: String) {
+        guard let key = key(creating: true),
+              let plain = try? PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0),
+              let sealed = try? AES.GCM.seal(plain, using: key).combined else {
+            return
+        }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? sealed.write(to: file(list), options: [.atomic, .completeFileProtection])
+    }
+
+    private static func keyQuery() -> [String: Any] {
+        return [kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: keychainService,
+                kSecAttrAccount as String: keychainAccount]
+    }
+
+    private static func key(creating: Bool) -> SymmetricKey? {
+        var query = keyQuery()
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: AnyObject?
+        if SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+           let data = result as? Data, data.count == 32 {
+            return SymmetricKey(data: data)
+        }
+        guard creating else { return nil }
+        let key = SymmetricKey(size: .bits256)
+        let data = key.withUnsafeBytes { Data($0) }
+        var item = keyQuery()
+        item[kSecValueData as String] = data
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        SecItemDelete(keyQuery() as CFDictionary)
+        guard SecItemAdd(item as CFDictionary, nil) == errSecSuccess else { return nil }
+        return key
+    }
+}
+
+extension Chat {
+
+    /// The row as a property list, for ChatListSnapshot.
+    var snapshotFields: [String: Any] {
+        return ["fpin": fpin, "pin": pin, "messageId": messageId, "counter": counter,
+                "messageText": messageText, "serverDate": serverDate, "image": image, "video": video,
+                "file": file, "attachmentFlag": attachmentFlag, "messageScope": messageScope,
+                "name": name, "profile": profile, "official": official, "status": status,
+                "credential": credential, "lock": lock, "thumb": thumb, "audio": audio, "gif": gif,
+                "groupId": groupId, "groupName": groupName, "isParent": isParent,
+                "pinned": NSNumber(value: pinned), "isBot": isBot, "isFolPinned": isFolPinned,
+                "namesMe": namesMe]
+    }
+
+    static func fromSnapshot(_ fields: [String: Any]) -> Chat {
+        func text(_ key: String) -> String { fields[key] as? String ?? "" }
+        let chat = Chat(fpin: text("fpin"), pin: text("pin"), messageId: text("messageId"), counter: text("counter"),
+                        messageText: text("messageText"), serverDate: text("serverDate"), image: text("image"),
+                        video: text("video"), file: text("file"), attachmentFlag: text("attachmentFlag"),
+                        messageScope: text("messageScope"), name: text("name"), profile: text("profile"),
+                        official: text("official"), status: text("status"), credential: text("credential"),
+                        lock: text("lock"), thumb: text("thumb"), audio: text("audio"), gif: text("gif"),
+                        groupId: text("groupId"), groupName: text("groupName"),
+                        isParent: fields["isParent"] as? Bool ?? false,
+                        pinned: (fields["pinned"] as? NSNumber)?.int64Value ?? 0,
+                        isBot: fields["isBot"] as? Int ?? 0,
+                        isFolPinned: fields["isFolPinned"] as? Bool ?? false)
+        chat.namesMe = fields["namesMe"] as? Bool ?? false
+        return chat
+    }
 }

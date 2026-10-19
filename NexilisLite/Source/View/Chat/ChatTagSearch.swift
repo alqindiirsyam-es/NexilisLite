@@ -2067,7 +2067,7 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
     public func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
         // QLPreviewController only ever asks after previewItem was set, but a nil here would
         // be a crash rather than an empty preview.
-        return previewItem ?? (URL(fileURLWithPath: "") as NSURL)
+        return OfficePreview.item(previewItem ?? (URL(fileURLWithPath: "") as NSURL))
     }
 }
 

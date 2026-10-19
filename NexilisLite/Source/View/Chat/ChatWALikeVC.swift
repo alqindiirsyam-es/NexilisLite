@@ -94,10 +94,19 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     
     @objc func onDisconnected(notification: NSNotification) {
         DispatchQueue.main.async {
-            self.loadingData = true
-            self.chatGroupMaps.removeAll()
-            self.chats.removeAll()
-            self.tableView.reloadData()
+            // Fix: every list emptied itself here and said "Loading Data..." until the database had
+            // been opened again and read - and this is posted each time the app comes back to the
+            // front (the database is closed while it is away), when it opens again, and when the
+            // phone is back online: twenty notifications, open the app, and the list went blank
+            // before it showed them. Only offline, where nothing may be read (OfflinePolicy), is the
+            // list taken down. Otherwise what was on screen stays there - it was on screen all the
+            // while the app was away - and the reload below updates it in place, as WhatsApp does.
+            if OfflinePolicy.isBlocking {
+                self.loadingData = true
+                self.chatGroupMaps.removeAll()
+                self.chats.removeAll()
+                self.tableView.reloadData()
+            }
             // Offline where the keys are not kept on the device: the list says why it is empty.
             OfflinePolicy.applyEmptyState(to: self.tableView)
             self.reloadAllData()
@@ -1477,6 +1486,6 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     }
     
     public func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> any QLPreviewItem {
-        return self.previewItem!
+        return OfficePreview.item(self.previewItem!)
     }
 }

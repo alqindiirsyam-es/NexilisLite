@@ -90,6 +90,9 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
         } else {
             SecureUserDefaults.shared.set("\(data[idx!].id):\(data[idx!].name)", forKey: "newNotifSoundGroup")
         }
+        // Pushes are worded and sounded on the phone now (the Notification Service Extension), so
+        // the new sound reaches them without the server.
+        NotificationShare.refreshSounds()
         //stopSound
         if Nexilis.sharedAudioPlayer != nil && Nexilis.sharedAudioPlayer!.isPlaying {
             Nexilis.sharedAudioPlayer?.stop()

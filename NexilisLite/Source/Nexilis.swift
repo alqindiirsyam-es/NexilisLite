@@ -38,7 +38,7 @@ enum NexilisCallDiagnostics {
 }
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "6.0.9"
+    public static var cpaasVersion = "6.0.10"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1207,6 +1207,13 @@ public class Nexilis: NSObject {
     }
     
     public static func destroyAll() {
+        // Fix: NotificationShare.clear() was called here, taken for the account being signed out of.
+        // It is not that: this ends the session, and runs every time a connection has been set up
+        // (Nexilis.initialize) and when the app is ended (APIS.willTerminate). So every launch wiped
+        // the extension's inbox - the messages it had shown and acknowledged, before the app took
+        // them in, gone for good - its account and the badge, which dropped to nothing as the app
+        // opened. It is called where the account really goes: APIS.logOut, and
+        // deleteAllRecordDatabase - every switch to another account.
         ContactCenterRequestGate.reset()
         ContactCenterSession.shared.discardPendingEditor()
         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
@@ -1407,7 +1414,7 @@ public class Nexilis: NSObject {
         return result
     }
     
-    static func getAddressNew(apiKey: String) -> String {
+    static func getAddressNew(apiKey: String, fresh: Bool = false) -> String {
         var result = ""
         
         if !Utils.getHarcodedIp().isEmpty {
@@ -1418,7 +1425,9 @@ public class Nexilis: NSObject {
 //        print("URL: \(url)")
         let urlConfig = URLSessionConfiguration.default
         let sessionDelegate = PinnedURLSessionNexilisDelegate()
-        urlConfig.requestCachePolicy = .returnCacheDataElseLoad
+        // A fresh read for a link being rebuilt from nothing (ConnectionWatch): a cached answer
+        // would bring back the cookies of a session the server may already have ended.
+        urlConfig.requestCachePolicy = fresh ? .reloadIgnoringLocalCacheData : .returnCacheDataElseLoad
         urlConfig.timeoutIntervalForRequest = 10.0
         urlConfig.timeoutIntervalForResource = 10.0
         let semaphore = DispatchSemaphore(value: 0)
@@ -1438,6 +1447,10 @@ public class Nexilis: NSObject {
             HTTPCookieStorage.shared.setCookies(cookies, for: url, mainDocumentURL: nil)
             if let cookieHeader = HTTPCookie.requestHeaderFields(with: cookies)["Cookie"] {
              Utils.setCookiesMobile(value: cookieHeader.replacingOccurrences(of: "; ", with: ";"))
+                // Fix: the notification extension asked the server with the cookies of the last
+                // time the app went to the background - a session the server may have ended since,
+                // and the notification came out as "You got messages...". It gets the new ones now.
+                NotificationShare.refreshCredentials()
             }
 
             let dataEncode = String(data: data, encoding: .utf8)!
@@ -5422,7 +5435,7 @@ extension Nexilis: QLPreviewControllerDataSource {
     }
     
     public func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-        return previewItem!
+        return OfficePreview.item(previewItem!)
     }
 }
 
@@ -5453,6 +5466,7 @@ final class PinnedURLSessionNexilisDelegate: NSObject,
 
         let domain = challenge.protectionSpace.host.lowercased()
         guard RASPGuard.shared().isPinnedHost(domain) else {
+            NotificationShare.rememberSystemTrust(host: domain)
             completionHandler(.useCredential, URLCredential(trust: serverTrust))
             return
         }
@@ -5462,6 +5476,9 @@ final class PinnedURLSessionNexilisDelegate: NSObject,
         // JSON is never an authorization source.
         if RASPGuard.shared().serverTrust(serverTrust, matchesPinnedSPKIForHost: domain)
             || PinSetStore.matches(trust: serverTrust, host: domain) {
+            // The key just verified against the real pins is the one the notification
+            // extension - which cannot run the pin check itself - will accept for this host.
+            NotificationShare.rememberVerifiedChain(host: domain, trust: serverTrust)
             completionHandler(.useCredential, URLCredential(trust: serverTrust))
         } else {
             RASPGuard.shared().reportPinningFailure(forHost: domain)
@@ -5734,6 +5751,12 @@ final class InAppBanner {
     func present(_ content: Content) {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { self.present(content) }
+            return
+        }
+        // The conversation a notification was just tapped for: its message arriving now is the one
+        // the reader is already on the way to, not news.
+        if let opening = APIS.notificationOpening, opening.thread == content.conversationId,
+           Date().timeIntervalSince(opening.at) < 20 {
             return
         }
         // Still catching up on a backlog: hold this one and let the settle decide.

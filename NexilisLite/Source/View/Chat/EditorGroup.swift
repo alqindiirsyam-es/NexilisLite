@@ -761,24 +761,15 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         for row in rows {
             let messageId = row["message_id"] as? String ?? ""
             mediaRowsOutsideWindowStorage[messageId] = row
-            let when = Double(row["server_date"] as? String ?? "") ?? 0
-            let text = row["message_text"] as? String ?? ""
             let file = row["file_id"] as? String ?? ""
             if !file.isEmpty {
                 // A file message carries its own name, size and kind in the text, separated by
                 // bars - the same reading the bubble in the conversation does.
-                let parts = text.components(separatedBy: "|")
-                docs.append(MediaBrowserViewController.DocItem(messageId: messageId,
-                                                              fileName: parts.first ?? file,
-                                                              storedName: file,
-                                                              detail: parts.count > 1 ? parts[1] : "",
-                                                              date: when))
-            } else if let url = MediaBrowserViewController.firstLink(in: text) {
-                links.append(MediaBrowserViewController.LinkItem(messageId: messageId,
-                                                                 url: url,
-                                                                 caption: text,
-                                                                 thumbFileName: row["thumb_id"] as? String ?? "",
-                                                                 date: when))
+                if let doc = MediaBrowserViewController.docItem(fromRow: row) {
+                    docs.append(doc)
+                }
+            } else if let link = MediaBrowserViewController.linkItem(fromRow: row) {
+                links.append(link)
             }
         }
         return (docs, links)
@@ -1039,7 +1030,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                                                  mediaFileName: $0.mediaFileName,
                                                  isVideo: $0.isVideo,
                                                  durationSeconds: durations[$0.messageId] ?? 0,
-                                                 date: Double(messageForMedia(messageId: $0.messageId)?["server_date"] as? String ?? "") ?? 0)
+                                                 date: Double(messageForMedia(messageId: $0.messageId)?["server_date"] as? String ?? "") ?? 0,
+                                                 isStarred: (messageForMedia(messageId: $0.messageId)?["is_stared"] as? String ?? "0") == "1",
+                                                 canShare: messageForMedia(messageId: $0.messageId).map { MediaBrowserViewController.canShare(row: $0) } ?? false)
         }
         let other = conversationDocsAndLinks()
         browser.docs = other.docs
@@ -1086,6 +1079,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             let rows = ids.compactMap { self.messageForMedia(messageId: $0) }
             self.presentDeleteOptions(for: rows, from: browser)
         }
+        browser.onStar = { [weak self] id in
+            self?.toggleStar(messageId: id)
+        }
         browser.focusMessageId = messageId
         if let stack = stack, let viewer = viewer {
             // Held on the browser so it lives as long as the two screens do - a navigation
@@ -1122,7 +1118,17 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         }
         // Media the strip reached past the end of the window for. Read once while the strip was
         // built, so following one of these costs nothing here.
-        return mediaRowsOutsideWindowStorage[messageId]
+        if let kept = mediaRowsOutsideWindowStorage[messageId] {
+            return kept
+        }
+        // Not seen by this screen yet - a document picked from the browser opened over a profile
+        // or a group's details, whose conversation never loaded it. Read once and kept, so its star,
+        // forward and delete have a message to work with.
+        guard !messageId.isEmpty, let row = messageRows(matching: "message_id = '\(messageId)'").first else {
+            return nil
+        }
+        mediaRowsOutsideWindowStorage[messageId] = row
+        return row
     }
 
     /// Brings a message into view, reading the page it lives on first if it is not loaded.
@@ -2068,6 +2074,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     
     public override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        isLeaving = true
         // The display link holds this screen; it must not outlive the screen's stay.
         stopTrackingKeyboard()
         stopHoldingUnderMenu()
@@ -2620,8 +2627,14 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         // this rule was taking every arrival for the second kind - so a conversation with unread
         // messages was carried to the newest one as soon as the bar changed size, which is what
         // opening it does. The marker's own placement says which kind this is.
+        // Fix: "still arriving" also counted any transition at all - and a swipe back that is
+        // started and then given up is a transition. The bar's room changes under it (the tab bar
+        // of the screen behind is counted into the safe area while the pop runs), and the reader,
+        // scrolled up into the history, was taken for one still arriving and carried to the newest
+        // message. Only the first arrival counts: until viewDidAppear has run once, arrivalSettled
+        // is false, which covers the push that opened the chat on its own.
         let stillArriving = pendingUnreadMarkerScroll == nil
-            && (!arrivalSettled || transitionCoordinator != nil || pendingInitialScrollToBottom)
+            && (!arrivalSettled || pendingInitialScrollToBottom)
         let wasAtEnd = stillArriving
             || tableChatView.contentOffset.y >= endBefore - (tableChatView.safeAreaInsets.bottom + 8)
         tableChatView.contentInset.bottom = room
@@ -2808,6 +2821,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
 
     public override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        isLeaving = false
         // Coming back from anywhere a name or a picture could have been changed - a profile, the
         // group's own screen - the names held for this conversation are read again.
         clearProfileCache()
@@ -3887,7 +3901,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                     }
                     window = "\(bounds) order by server_date asc"
                 }
-                let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where \(self.messageWhereClause()) \(window)"
+                let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned, is_call_center, call_center_id, opposite_pin FROM MESSAGE where \(self.messageWhereClause()) \(window)"
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     var tempImages: [ImageGrouping] = []
                     var idxOff = 0
@@ -3977,9 +3991,14 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                                 }
                             }
                         }
-                        row[TypeDataMessage.is_call_center] = cursorData.string(forColumnIndex: 20)
-                        row[TypeDataMessage.call_center_id] = cursorData.string(forColumnIndex: 21)
-                        row[TypeDataMessage.opposite_pin] = cursorData.string(forColumnIndex: 22)
+                        // Fix: these were read from columns 20 to 22, which in this query are
+                        // last_edited, gif_id and is_forwarded_message - so a group message carried
+                        // its edit time as is_call_center, its GIF as call_center_id and its forward
+                        // flag as opposite_pin. They are asked for by name now, at the end of the
+                        // query, and read from there (as appendNewMessage reads them).
+                        row[TypeDataMessage.is_call_center] = cursorData.string(forColumnIndex: 25)
+                        row[TypeDataMessage.call_center_id] = cursorData.string(forColumnIndex: 26)
+                        row[TypeDataMessage.opposite_pin] = cursorData.string(forColumnIndex: 27)
                         // Fix: this asked the filesystem where the documents directory is, and
                         // then whether two files exist, for every single row of every page - and
                         // the second of those two was asked even for a message carrying no file
@@ -7407,9 +7426,15 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         })
     }
     
-    private func updateCounter(counter: Int) {
+    private func updateCounter(counter: Int, caller: String = #function) {
         guard !isPreview else {
             return
+        }
+        if counter == 0 {
+            // For the diagnostics ("notif"): what cleared a conversation's unread count, and in
+            // what state the screen was.
+            let pin = (dataTopic["chat_id"] as? String ?? "").isEmpty ? (dataGroup["group_id"] as? String ?? "") : (dataTopic["chat_id"] as? String ?? "")
+            NotificationShare.noteFromApp("unread …\(pin.suffix(6)) cleared by group \(caller) leaving=\(isLeaving) window=\(viewIfLoaded?.window != nil)")
         }
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
@@ -8343,8 +8368,18 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// nothing on its own; what settles it is being the screen its navigation stack is showing.
     /// Anything merely presented over it - the picture viewer, a sheet - leaves it the top of
     /// that stack, which is right: reading carries on underneath.
+    /// Set from the moment the screen starts to go - a pop, a swipe back, a dismissal, another
+    /// screen pushed over it - until it comes back.
+    private var isLeaving = false
+
     private var isReaderPresent: Bool {
-        guard !isPreview, viewIfLoaded?.window != nil,
+        // Fix: while the screen was on its way out - the pop's animation, a swipe back under way,
+        // the dismissal of a conversation opened from a notification - it was still in the window
+        // and, for a dismissal, still its navigation's top, so it counted as being read. A message
+        // landing then was announced (the screen had already said it was no longer open) and also
+        // reported read, with the list's unread count put back to nothing: the banner came, the
+        // badge did not.
+        guard !isPreview, !isLeaving, viewIfLoaded?.window != nil,
               UIApplication.shared.applicationState == .active else {
             return false
         }
@@ -12437,7 +12472,8 @@ extension EditorGroup: UICollectionViewDelegate, UICollectionViewDataSource {
     }
     
     public func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-        return self.previewItem!
+        // A presentation the system's previewer cannot open as it is - see OfficePreview.
+        return OfficePreview.item(self.previewItem!)
     }
 }
 

@@ -1266,6 +1266,12 @@ class IncomingThread {
     }
     
     private func receiveMessage(message: TMessage) -> Void {
+        // First, before anything that can wait or return: the notification extension may be asking
+        // the server for this very message right now and find it gone - taken here - so it is left
+        // a copy to word its notification from (NotificationShare.rememberDelivered).
+        if message.mCode == CoreMessage_TMessageCode.SEND_CHAT {
+            NotificationShare.rememberDelivered(message)
+        }
 //        print("receive message \(message.toLogString())")
         if Utils.getSecureFolderOffline() == "0" {
             _ = Nexilis.justInit(isChecking: true)

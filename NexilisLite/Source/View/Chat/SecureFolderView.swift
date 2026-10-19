@@ -412,7 +412,7 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
     }
     
     public func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-        return self.previewItem!
+        return OfficePreview.item(self.previewItem!)
     }
     
 }

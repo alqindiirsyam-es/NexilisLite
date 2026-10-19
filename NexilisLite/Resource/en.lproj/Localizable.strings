@@ -28,3 +28,6 @@
 "You cannot open a chat when you're offline. The conversation will automatically close in 5 seconds." = "You cannot open a chat when you're offline. The conversation will automatically close in 5 seconds.";
 "Invalid App State!" = "Invalid App State!";
 "Please re-open app again, the application will automatically stop. To try again, please use stable connection!" = "Please re-open app again, the application will automatically stop. To try again, please use stable connection!";
+"1 page" = "1 page";
+"%d pages" = "%d pages";
+"Download failed. Please try again." = "Download failed. Please try again.";

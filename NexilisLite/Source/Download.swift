@@ -526,6 +526,14 @@ private final class NexilisServerTrustEvaluator: ServerTrustEvaluating {
            !PinnedURLSessionNexilisDelegate.isTrustedPinnedHost(trust: trust, host: host) {
             throw NSError(domain: "NexilisTLS", code: -7301, userInfo: [NSLocalizedDescriptionKey: "SPKI pin mismatch for \(host)"])
         }
+        // What the notification extension, which fetches a message's picture itself, may trust
+        // for this host - see NotificationShare.
+        let domain = host.lowercased()
+        if RASPGuard.shared().isPinnedHost(domain) {
+            NotificationShare.rememberVerifiedChain(host: domain, trust: trust)
+        } else {
+            NotificationShare.rememberSystemTrust(host: domain)
+        }
     }
 }
 

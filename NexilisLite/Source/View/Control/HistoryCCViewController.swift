@@ -332,7 +332,7 @@ public class HistoryCCViewController: UITableViewController, QLPreviewController
     }
     
     public func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-        return self.previewItem!
+        return OfficePreview.item(self.previewItem!)
     }
 
 }
