@@ -110,6 +110,12 @@ public enum NotificationShare {
         }
     }
 
+    /// A Contact Center request has just been sent: the extension may say once again that no officer
+    /// has answered it (CC25, which it otherwise says only once in a while).
+    public static func noteContactCenterRequest() {
+        defaults?.removeObject(forKey: "nx.notif.cc25.at")
+    }
+
     /// The Auto Download setting, as it has just been switched: the extension attaches a picture or
     /// a video itself only when it is on (a thumbnail always, as the app fetches one always).
     public static func noteAutoDownload(_ on: Bool) {

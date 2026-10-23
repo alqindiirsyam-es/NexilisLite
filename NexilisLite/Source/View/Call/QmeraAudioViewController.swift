@@ -64,6 +64,7 @@ class QmeraAudioViewController: UIViewController {
         
     private var users: [User] = [] {
         didSet {
+            noteParticipants(users)
             DispatchQueue.main.async {
                 if oldValue.count > self.users.count { // remove
                     let remove = oldValue.filter { !self.users.contains($0) }
@@ -88,6 +89,23 @@ class QmeraAudioViewController: UIViewController {
         }
     }
     
+    /// Everyone this call has had - `users` loses people as they leave. See CallParticipants.
+    private var callParticipants: CallParticipants {
+        participantsLock.lock(); defer { participantsLock.unlock() }
+        return participants
+    }
+    private var participants = CallParticipants()
+    private let participantsLock = NSLock()
+
+    private func noteParticipants(_ users: [User]) {
+        let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+        let ticket = !ticketId.isEmpty ? ticketId : onGoingCC.isEmpty ? "" : onGoingCC.component(2, separatedBy: ",")
+        participantsLock.lock()
+        users.forEach { participants.add(pin: $0.pin, name: $0.fullName) }
+        participantsLock.unlock()
+        users.forEach { CallParticipants.noteContactCenter(ticket: ticket, pin: $0.pin, name: $0.fullName) }
+    }
+
     var isOutgoing: Bool = true
     
     var isOnGoing: Bool = false
@@ -356,6 +374,18 @@ class QmeraAudioViewController: UIViewController {
     }
     
     private func backToDefaultAudioSession() {
+        // Fix: a call the system knows about - every call reported to CallKit, Contact Center
+        // calls included - has its audio session activated by CallKit. This made it mixable and
+        // activated it by hand, again on every step of the call (answering, a Contact Center room
+        // opening, someone being added), and the call SDK, opening the audio for the next person,
+        // found a session it could not use and crashed. For such a call only the call's own
+        // category and the speaker are set here; CallKit does the rest (see
+        // CallManager.isCallAudioActive).
+        if CallManager.shared.hasActiveCalls {
+            CallManager.prepareCallAudioSession(video: false)
+            try? AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
+            return
+        }
         do {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .mixWithOthers])
@@ -379,7 +409,8 @@ class QmeraAudioViewController: UIViewController {
                     fPin: User.getMyPin() ?? "",
                     lPin: !self.data.isEmpty ? self.data : self.user?.pin ?? "",
                     timeCall: self.timeStartCall,
-                    attachment_type: MessageScope.CALL
+                    attachment_type: MessageScope.CALL,
+                    participants: self.callParticipants
                 )
                 self.status.text = "The call was not answered"
                 self.end.isEnabled = false
@@ -543,7 +574,7 @@ class QmeraAudioViewController: UIViewController {
                                 }
                                 DispatchQueue.main.async {
                                     let longCall =  "0"
-                                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL, participants: self.callParticipants)
                                     self.status.text = "Busy..."
                                     self.end.isEnabled = false
                                     if self.isOutgoing {
@@ -582,10 +613,21 @@ class QmeraAudioViewController: UIViewController {
                     API.csa(sTicketID: ticketId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView, bCameraOn: false)
                 }
             } else if autoAcceptAPN {
-                DispatchQueue.global().async {
-                    self.backToDefaultAudioSession()
-                    _ = Nexilis.justInit()
-                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getNotifyCalling(fPin: u.pin, lPin: User.getMyPin()!, type: "1"))
+                // Answered through CallKit: the call is only asked for - which is what makes the SDK
+                // start its audio - once CallKit has activated the session. Activating it here, and
+                // as mixable, crashed the SDK on iOS 15 (see CallManager.isCallAudioActive).
+                CallManager.shared.whenCallAudioActive { [weak self] in
+                    guard let self = self else { return }
+                    if CallManager.shared.isCallAudioActive {
+                        try? AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
+                    } else {
+                        // CallKit never said so: the way it was done before.
+                        self.backToDefaultAudioSession()
+                    }
+                    DispatchQueue.global().async {
+                        _ = Nexilis.justInit()
+                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getNotifyCalling(fPin: u.pin, lPin: User.getMyPin()!, type: "1"))
+                    }
                 }
             }
         }
@@ -610,7 +652,7 @@ class QmeraAudioViewController: UIViewController {
                     }
                     DispatchQueue.main.async {
                         let longCall =  "0"
-                        Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                        Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL, participants: self.callParticipants)
                         self.status.text = "Busy..."
                         self.end.isEnabled = false
                         if self.isOutgoing {
@@ -1065,9 +1107,9 @@ class QmeraAudioViewController: UIViewController {
         // the banner is the confirmation.
         if timer == nil || isOutgoing {
             let longCall = timer == nil ? "0" : status.text ?? ""
-            Nexilis.saveMessageCall(idCall: idCall, textMessage: "Outgoing audio call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !data.isEmpty ? data : user != nil ? user!.pin : "", timeCall: timeStartCall, attachment_type: MessageScope.CALL)
+            Nexilis.saveMessageCall(idCall: idCall, textMessage: "Outgoing audio call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !data.isEmpty ? data : user != nil ? user!.pin : "", timeCall: timeStartCall, attachment_type: MessageScope.CALL, participants: self.callParticipants)
         } else {
-            Nexilis.saveMessageCall(idCall: idCall, textMessage: "Incoming audio call" + " at \(status.text ?? "")", fPin: !data.isEmpty ? data : user != nil ? user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: timeStartCall, attachment_type: MessageScope.CALL)
+            Nexilis.saveMessageCall(idCall: idCall, textMessage: "Incoming audio call" + " at \(status.text ?? "")", fPin: !data.isEmpty ? data : user != nil ? user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: timeStartCall, attachment_type: MessageScope.CALL, participants: self.callParticipants)
         }
         if callFCM, timer == nil, let pin = user?.pin {
             DispatchQueue.global().async {
@@ -1095,9 +1137,9 @@ class QmeraAudioViewController: UIViewController {
             DispatchQueue.main.async {
                 if self.timer == nil || self.isOutgoing {
                     let longCall = self.timer == nil ? "0" : self.status.text ?? ""
-                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL, participants: self.callParticipants)
                 } else if !self.isOutgoing {
-                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Incoming audio call" + " at \(self.status.text ?? "")", fPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Incoming audio call" + " at \(self.status.text ?? "")", fPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL, participants: self.callParticipants)
                 }
                 if self.callFCM && self.timer == nil {
                     print("MASUK CANCEL CALL")
@@ -1180,7 +1222,7 @@ class QmeraAudioViewController: UIViewController {
                                     "data" : complaintId,
                                     "time_end" : date,
                                     "complaint_id" : complaintId,
-                                    "members" : "",
+                                    "members" : CallParticipants.contactCenterMembers(ticket: complaintId),
                                     "requester": requester
                                 ], replace: true)
                             } catch {
@@ -1189,6 +1231,7 @@ class QmeraAudioViewController: UIViewController {
                             }
                         })
                     }
+                    ContactCenterSession.shared.noteSessionEnded()
                     SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
                     SecureUserDefaults.shared.removeValue(forKey: "membersCC")
                     SecureUserDefaults.shared.removeValue(forKey: "startTimeCC")
@@ -1220,7 +1263,7 @@ class QmeraAudioViewController: UIViewController {
                                 "data" : complaintId,
                                 "time_end" : date,
                                 "complaint_id" : complaintId,
-                                "members" : "",
+                                "members" : CallParticipants.contactCenterMembers(ticket: complaintId),
                                 "requester": requester
                             ], replace: true)
                         } catch {
@@ -1237,6 +1280,7 @@ class QmeraAudioViewController: UIViewController {
                             _ = Nexilis.write(message: CoreMessage_TMessageBank.leaveCCRoomInvite(ticket_id: complaintId))
                         }
                     }
+                    ContactCenterSession.shared.noteSessionEnded()
                     SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
                     SecureUserDefaults.shared.removeValue(forKey: "membersCC")
                     SecureUserDefaults.shared.removeValue(forKey: "startTimeCC")
@@ -1257,7 +1301,7 @@ class QmeraAudioViewController: UIViewController {
     
     @objc func didReject(sender: Any?) {
         if self.timer == nil {
-            Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Missed audio call" + " at 0", fPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.MISSED_CALL)
+            Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Missed audio call" + " at 0", fPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.MISSED_CALL, participants: self.callParticipants)
         }
         didEnd(sender: sender)
     }
@@ -1331,16 +1375,17 @@ class QmeraAudioViewController: UIViewController {
                         if arrayMessage[2] != "." {
                             param = arrayMessage[2]
                         }
+                        // Fix: the person's place in the list was used on the row of pictures
+                        // without asking whether it had a picture yet - someone just added to the
+                        // call is on the list a moment before they are drawn, and a mute arriving
+                        // then was "Index out of range".
+                        let profile = index < profiles.subviews.count ? profiles.subviews[index] as? ProfileView : nil
                         if param == "1" {
                             users[index].isMuted = true
-                            if let profile = profiles.subviews[index] as? ProfileView {
-                                profile.imageMuted.isHidden = false
-                            }
+                            profile?.imageMuted.isHidden = false
                         } else {
                             users[index].isMuted = false
-                            if let profile = profiles.subviews[index] as? ProfileView {
-                                profile.imageMuted.isHidden = true
-                            }
+                            profile?.imageMuted.isHidden = true
                         }
                     }
                 }
@@ -1495,12 +1540,12 @@ class QmeraAudioViewController: UIViewController {
                         DispatchQueue.main.async {
                             if self.isOutgoing {
                                 let longCall = self.timer == nil ? "0" : self.status.text ?? ""
-                                Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                                Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL, participants: self.callParticipants)
                             } else {
                                 if self.timer == nil {
-                                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Missed audio call" + " at 0", fPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.MISSED_CALL)
+                                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Missed audio call" + " at 0", fPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.MISSED_CALL, participants: self.callParticipants)
                                 } else {
-                                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Incoming audio call" + " at \(self.status.text ?? "")", fPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Incoming audio call" + " at \(self.status.text ?? "")", fPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL, participants: self.callParticipants)
                                 }
                             }
                             self.timer?.invalidate()
@@ -1598,7 +1643,7 @@ class QmeraAudioViewController: UIViewController {
                 if users.count == 0 {
                     DispatchQueue.main.async {
                         let longCall =  "0"
-                        Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                        Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL, participants: self.callParticipants)
                         self.status.text = "Busy..."
                         self.end.isEnabled = false
                         if self.isOutgoing {

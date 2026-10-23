@@ -38,7 +38,7 @@ enum NexilisCallDiagnostics {
 }
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "6.0.10"
+    public static var cpaasVersion = "6.0.11"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1234,7 +1234,7 @@ public class Nexilis: NSObject {
                         "data" : complaintId,
                         "time_end" : date,
                         "complaint_id" : complaintId,
-                        "members" : "",
+                        "members" : CallParticipants.contactCenterMembers(ticket: complaintId),
                         "requester": requester
                     ], replace: true)
                 } catch {
@@ -1251,6 +1251,7 @@ public class Nexilis: NSObject {
                     _ = Nexilis.write(message: CoreMessage_TMessageBank.leaveCCRoomInvite(ticket_id: complaintId))
                 }
             }
+            ContactCenterSession.shared.noteSessionEnded()
             SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
             SecureUserDefaults.shared.removeValue(forKey: "membersCC")
             SecureUserDefaults.shared.removeValue(forKey: "startTimeCC")
@@ -1343,7 +1344,13 @@ public class Nexilis: NSObject {
     }
     
     private static var wbDelegate: WhiteboardDelegate?
-    private static var wbReceiver: WhiteboardReceiver?
+    // Fix: the receiver was held strongly here, for good - and the receiver is the video call's
+    // own screen. The screen outlived its call, the weak record of the call in progress
+    // (APIS.isCallInProgress) never let go, and after one video call every new call was turned
+    // away with "A video call is in progress". A screen is held weakly now; anything else that
+    // conforms is held as before.
+    private static weak var wbReceiverObject: AnyObject?
+    private static var wbReceiverValue: WhiteboardReceiver?
     
     public static func setWhiteboardDelegate(delegate: WhiteboardDelegate?){
         Nexilis.wbDelegate = delegate
@@ -1354,11 +1361,17 @@ public class Nexilis: NSObject {
     }
     
     public static func setWhiteboardReceiver(receiver: WhiteboardReceiver?){
-        Nexilis.wbReceiver = receiver
+        if let receiver = receiver, type(of: receiver) is AnyClass {
+            Nexilis.wbReceiverObject = receiver as AnyObject
+            Nexilis.wbReceiverValue = nil
+        } else {
+            Nexilis.wbReceiverObject = nil
+            Nexilis.wbReceiverValue = receiver
+        }
     }
     
     public static func getWhiteboardReceiver() -> WhiteboardReceiver? {
-        return Nexilis.wbReceiver
+        return (Nexilis.wbReceiverObject as? WhiteboardReceiver) ?? Nexilis.wbReceiverValue
     }
     
     public static func getEditorPersonal() -> EditorPersonal {
@@ -2203,8 +2216,11 @@ public class Nexilis: NSObject {
                         return carriedText
                     }
                     // Already in the shape the app reads, and the sender's own name for it is
-                    // there: nothing to do.
-                    if !carriedText.components(separatedBy: "|")[0]
+                    // there: nothing to do. Fix: without a "|" in it the text is the caption alone,
+                    // not a name - it was kept as it was, so the caption went in where the name
+                    // belongs and the document was read as having nothing written with it.
+                    if carriedText.contains("|"),
+                       !carriedText.components(separatedBy: "|")[0]
                         .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         return carriedText
                     }
@@ -2652,7 +2668,20 @@ public class Nexilis: NSObject {
     }
     
     public static func saveMessageCall(idCall: String, textMessage: String, fPin: String, lPin: String, timeCall: String, attachment_type:String) {
+        saveMessageCall(idCall: idCall, textMessage: textMessage, fPin: fPin, lPin: lPin, timeCall: timeCall, attachment_type: attachment_type, participants: nil)
+    }
+
+    /// A call's record, with everyone else it had - see CallParticipants.
+    static func saveMessageCall(idCall: String, textMessage: String, fPin: String, lPin: String, timeCall: String, attachment_type:String, participants: CallParticipants?) {
         guard let me = User.getMyPin() else {
+            return
+        }
+        // Fix: a Contact Center call - three people in it, the officer ending the session - went down
+        // as an ordinary call too, on the requester's side and the invited member's: the session's
+        // marks were cleared before the call screens were closed, and those screens save a call
+        // whatever it was. A Contact Center call belongs to its own history (CALL_CENTER_HISTORY).
+        if attachment_type == MessageScope.CALL || attachment_type == MessageScope.MISSED_CALL,
+           ContactCenterSession.shared.ownsCallsEndingNow {
             return
         }
         let dataFpin = User.getDataCanNil(pin: fPin)
@@ -2692,7 +2721,8 @@ public class Nexilis: NSObject {
                     "account_type" : "1",
                     "credential" :"",
                     "reff_id" : "",
-                    "message_large_text" : "",
+                    // Everyone else a group call had - see CallParticipants.
+                    "message_large_text" : participants?.stored ?? "",
                     "attachment_flag" : attachment_type,
                     "local_timestamp" : timeCall
                 ], replace: true)

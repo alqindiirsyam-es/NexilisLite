@@ -30,8 +30,35 @@ class QmeraVideoViewController: UIViewController {
     static private let audioWatch = AudioEngineWatch(label: "io.nexilis.QmeraVideoViewController.audioWatch")
     
     
-    var dataPerson: [[String: String?]] = []
+    var dataPerson: [[String: String?]] = [] {
+        didSet { noteParticipants(dataPerson) }
+    }
     var fPin = ""
+
+    /// Everyone this call has had - `dataPerson` loses people as they leave. See CallParticipants.
+    private var callParticipants: CallParticipants {
+        participantsLock.lock(); defer { participantsLock.unlock() }
+        return participants
+    }
+    private var participants = CallParticipants()
+    private let participantsLock = NSLock()
+
+    private func noteParticipants(_ people: [[String: String?]]) {
+        let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+        let ticket = !ticketId.isEmpty ? ticketId : onGoingCC.isEmpty ? "" : onGoingCC.component(2, separatedBy: ",")
+        let found = people.compactMap { person -> (String, String)? in
+            guard let pin = person["f_pin"] ?? nil, !pin.isEmpty else { return nil }
+            let name = (person["name"] ?? nil) ?? ""
+            // A pin with no contact behind it is shown as "User"; that is no name to keep. The name
+            // is looked up again when the list is shown - this runs inside a database transaction
+            // (getDataProfile), where nothing may read the database again.
+            return (pin, name == "User".localized() ? "" : name.trimmingCharacters(in: .whitespaces))
+        }
+        participantsLock.lock()
+        found.forEach { participants.add(pin: $0.0, name: $0.1) }
+        participantsLock.unlock()
+        found.forEach { CallParticipants.noteContactCenter(ticket: ticket, pin: $0.0, name: $0.1) }
+    }
 
     /// True only for the moment it takes to shrink this call into the corner.
     private var isMinimizing = false
@@ -225,6 +252,8 @@ class QmeraVideoViewController: UIViewController {
     var isAddCall = ""
     var ticketId = ""
     var autoAcceptAPN = false
+    /// Set once the push-woken call has been accepted - see viewWillLayoutSubviews.
+    private var autoAcceptAPNStarted = false
     var timeStartCall = ""
     var idCall = ""
     private var frontCamera = true
@@ -312,12 +341,35 @@ class QmeraVideoViewController: UIViewController {
         APIS.callSessionEnded(video: self)
     }
     
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // Dismissed rather than popped - how a call screen is usually closed - is the call over too,
+        // unless it is only being shrunk into the corner. Said here rather than left to deinit:
+        // anything still holding this screen kept the call "in progress" and every new call was
+        // turned away (see APIS.isCallInProgress).
+        let dismissed = isBeingDismissed || navigationController?.isBeingDismissed == true
+        if dismissed && !isMinimizing {
+            APIS.callSessionEnded(video: self)
+        }
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Fix: the call ran under its navigation controller's bar - empty, but there - so the
+        // picture started below it and the top of the screen showed the controller's own background.
+        // No bar during a call: the picture runs to the top of the screen, under the status bar and
+        // the Dynamic Island, and the controls keep to the safe area as before.
+        navigationController?.setNavigationBarHidden(true, animated: false)
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         if isMinimizing {
             // Off screen, not over.
             return
         }
         if self.isMovingFromParent {
+            // The bar back for whatever this call was pushed over.
+            navigationController?.setNavigationBarHidden(false, animated: false)
             navigationController?.changeAppearance(clear: false)
             let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
             navigationController?.navigationBar.titleTextAttributes = textAttributes
@@ -333,6 +385,18 @@ class QmeraVideoViewController: UIViewController {
     }
     
     private func backToDefaultAudioSession() {
+        // Fix: a call the system knows about - every call reported to CallKit, Contact Center
+        // calls included - has its audio session activated by CallKit. This made it mixable and
+        // activated it by hand, again on every step of the call (answering, a Contact Center room
+        // opening, someone being added), and the call SDK, opening the audio for the next person,
+        // found a session it could not use and crashed. For such a call only the call's own
+        // category and the speaker are set here; CallKit does the rest (see
+        // CallManager.isCallAudioActive).
+        if CallManager.shared.hasActiveCalls {
+            CallManager.prepareCallAudioSession(video: true)
+            try? AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
+            return
+        }
         do {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .mixWithOthers])
@@ -452,9 +516,17 @@ class QmeraVideoViewController: UIViewController {
         addTimerVC()
         addImageMutedOnZoom()
         if isAutoAccept {
-            didTapAcceptCallButton()
+            // Fix: this ran on every layout pass, so the call was accepted over and over; and it
+            // started the SDK's audio before CallKit had handed the session over, which crashed it
+            // on iOS 15 (see CallManager.isCallAudioActive). Once, and once the session is there.
+            isAutoAccept = false
+            CallManager.shared.whenCallAudioActive { [weak self] in
+                self?.didTapAcceptCallButton()
+            }
         }
-        if autoAcceptAPN {
+        if autoAcceptAPN && !autoAcceptAPNStarted {
+            // Once: this runs on every layout pass, and each pass asked the server for the call again.
+            autoAcceptAPNStarted = true
             self.buttonAccept.isHidden = true
             self.buttonDecline.isHidden = true
             if UIApplication.shared.isProtectedDataAvailable {
@@ -482,8 +554,22 @@ class QmeraVideoViewController: UIViewController {
     }
 
     private func executeAutoAccept() {
+        // Answered through CallKit: the call is only asked for - which is what makes the SDK start
+        // its audio - once CallKit has activated the session (see CallManager.isCallAudioActive).
+        CallManager.shared.whenCallAudioActive { [weak self] in
+            guard let self = self else { return }
+            if CallManager.shared.isCallAudioActive {
+                try? AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
+            } else {
+                // CallKit never said so: the way it was done before.
+                self.backToDefaultAudioSession()
+            }
+            self.notifyCallingAfterAnswer()
+        }
+    }
+
+    private func notifyCallingAfterAnswer() {
         DispatchQueue.global().async {
-            self.backToDefaultAudioSession()
             _ = Nexilis.justInit()
             _ = Nexilis.write(message: CoreMessage_TMessageBank.getNotifyCalling(
                 fPin: self.fPin,
@@ -508,6 +594,19 @@ class QmeraVideoViewController: UIViewController {
             }
         }
     
+    /// Whether there is a tile - the picture, the name and the mute mark - for the person at this
+    /// place, and a person for it.
+    ///
+    /// Fix: the tiles were reached into by position without asking. Adding a third person to a call
+    /// (a Contact Center one most of all) went on assuming the person had been looked up and added,
+    /// and a person who was not - their pin was our own, or the database was shut at that moment -
+    /// or an event arriving after the call had been ended and every list emptied, took the screen
+    /// down with "Index out of range".
+    private func hasTile(_ index: Int) -> Bool {
+        return index >= 0 && index < listRemoteViewFix.count && index < containerLabelName.count
+            && index < imageMuted.count && index < dataPerson.count
+    }
+
     func getDataProfile(fPin: String) {
         let query = "SELECT f_pin, first_name, last_name, official_account, image_id, device_id, offline_mode, user_type FROM BUDDY where f_pin = '\(fPin)'"
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
@@ -591,20 +690,55 @@ class QmeraVideoViewController: UIViewController {
         mutedZoom.anchor(top: containerTimerVC.bottomAnchor, paddingTop: 10, centerX: view.centerXAnchor, width: 30, height: 40)
     }
     
+    /// The remote picture's size, against the screen's - swapped while it is turned (turnZoomView).
+    private var zoomWidth: NSLayoutConstraint?
+    private var zoomHeight: NSLayoutConstraint?
+
     func addZoomView() {
         view.addSubview(zoomView)
         zoomView.translatesAutoresizingMaskIntoConstraints = false
+        let width = zoomView.widthAnchor.constraint(equalTo: view.widthAnchor)
+        let height = zoomView.heightAnchor.constraint(equalTo: view.heightAnchor)
         NSLayoutConstraint.activate([
-            zoomView.topAnchor.constraint(equalTo: view.topAnchor),
-            zoomView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            zoomView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            zoomView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            zoomView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            zoomView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            width,
+            height
         ])
+        zoomWidth = width
+        zoomHeight = height
         zoomView.backgroundColor = .secondaryColor
+        // Fix: the picture was drawn with UIImageView's default, scaleToFill - stretched to whatever
+        // shape the screen is. Filled now, the way the reference does it: edge to edge, the
+        // picture's own proportions kept and what does not fit cropped off its edges.
+        zoomView.contentMode = .scaleAspectFill
+        zoomView.clipsToBounds = true
         zoomView.isUserInteractionEnabled = true
         zoomView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(hideToolbar)))
     }
     
+    /// Turns the remote picture a quarter round - the call engine hands portrait video over lying on
+    /// its side - so it stands up and covers the whole screen.
+    ///
+    /// Fix: it was turned and then stretched by a fixed 1.9 by 2.0, numbers that fit a screen of
+    /// about two to one. On a taller one - an iPhone 17 Pro - the picture stopped short of the top
+    /// and the bottom by some 35 points each and ran off the sides, and the stretch bent the picture
+    /// out of its own proportions. The view is given the screen's size the other way round before it
+    /// is turned, so once turned it is exactly the screen, and the picture fills it as it is: edge to
+    /// edge, its proportions kept, what does not fit cropped off.
+    private func turnZoomView(by angle: CGFloat, mirrored: Bool = false) {
+        zoomWidth?.isActive = false
+        zoomHeight?.isActive = false
+        let width = zoomView.widthAnchor.constraint(equalTo: view.heightAnchor)
+        let height = zoomView.heightAnchor.constraint(equalTo: view.widthAnchor)
+        NSLayoutConstraint.activate([width, height])
+        zoomWidth = width
+        zoomHeight = height
+        zoomView.contentMode = .scaleAspectFill
+        zoomView.transform = CGAffineTransform(scaleX: mirrored ? -1 : 1, y: 1).rotated(by: angle)
+        view.layoutIfNeeded()
+    }
+
     func addCameraView() {
         view.addSubview(cameraView)
 //        cameraView.frame = CGRect(x: view.frame.width - 130, y: 20, width: 120, height: 160)
@@ -914,12 +1048,12 @@ class QmeraVideoViewController: UIViewController {
             longCall = self.labelTimerVC.text ?? ""
         }
         if self.isInisiator {
-            Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing video call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: self.dataPerson[0]["f_pin"]!!, timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+            Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing video call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: self.dataPerson[0]["f_pin"]!!, timeCall: self.timeStartCall, attachment_type: MessageScope.CALL, participants: self.callParticipants)
         } else {
             if !self.vcTimer.isValid {
-                Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Missed video call" + " at 0", fPin: self.dataPerson[0]["f_pin"]!!, lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.MISSED_CALL)
+                Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Missed video call" + " at 0", fPin: self.dataPerson[0]["f_pin"]!!, lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.MISSED_CALL, participants: self.callParticipants)
             } else {
-                Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Incoming video call" + " at \(longCall)", fPin: self.dataPerson[0]["f_pin"]!!, lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Incoming video call" + " at \(longCall)", fPin: self.dataPerson[0]["f_pin"]!!, lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL, participants: self.callParticipants)
             }
         }
     }
@@ -1414,7 +1548,7 @@ class QmeraVideoViewController: UIViewController {
                             "data" : complaintId,
                             "time_end" : date,
                             "complaint_id" : complaintId,
-                            "members" : "",
+                            "members" : CallParticipants.contactCenterMembers(ticket: complaintId),
                             "requester": requester
                         ], replace: true)
                     } catch {
@@ -1431,6 +1565,7 @@ class QmeraVideoViewController: UIViewController {
                         _ = Nexilis.write(message: CoreMessage_TMessageBank.leaveCCRoomInvite(ticket_id: complaintId))
                     }
                 }
+                ContactCenterSession.shared.noteSessionEnded()
                 SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
                 SecureUserDefaults.shared.removeValue(forKey: "membersCC")
                 SecureUserDefaults.shared.removeValue(forKey: "startTimeCC")
@@ -1634,7 +1769,7 @@ class QmeraVideoViewController: UIViewController {
                 }
                 if let idx = self.users.firstIndex(where: { $0.pin == user }) {
                     self.users[idx].isMuted = isMuted
-                    if self.dataPerson.count > 1 {
+                    if self.dataPerson.count > 1, idx < self.imageMuted.count {
                         self.imageMuted[idx].isHidden = !isMuted
                     }
                 }
@@ -1652,21 +1787,19 @@ class QmeraVideoViewController: UIViewController {
         } else if (state == Nexilis.VIDEO_CALL_ZOOM) && self.dataPerson.count > 1 {
             DispatchQueue.main.async {
                 if arrayMessage[0] != arrayMessage[3] && !self.rotateMyView {
-                    self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (CGFloat.pi)/2)
-                    self.zoomView.contentMode = .scaleAspectFit
+                    self.turnZoomView(by: CGFloat.pi / 2)
                 } else {
                     self.rotateMyView = true
-                    self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (-CGFloat.pi)/2)
-                    self.zoomView.contentMode = .scaleAspectFit
+                    self.turnZoomView(by: -CGFloat.pi / 2)
                 }
             }
         } else if (state == Nexilis.VIDEO_CAMERA_PARAMS_CHANED){
             if(arrayMessage[3] == "0"){
                 DispatchQueue.main.async {
                     if self.dataPerson.count == 1 && arrayMessage[2] == "1" && arrayMessage[4] == "1" {
-                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (-CGFloat.pi)/2)
+                        self.turnZoomView(by: -CGFloat.pi / 2)
                     } else {
-                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (CGFloat.pi)/2)
+                        self.turnZoomView(by: CGFloat.pi / 2)
                     }
                 }
             }
@@ -1717,6 +1850,7 @@ class QmeraVideoViewController: UIViewController {
             DispatchQueue.main.async {
                 if (self.dataPerson.count == 1 && String(arrayMessage[1]) != self.dataPerson[0]["f_pin"]!!) {
                     self.getDataProfile(fPin: String(arrayMessage[1]))
+                    guard self.hasTile(0), self.hasTile(1) else { return }
                     for i in 0...1 {
                         self.scrollRemoteView.addSubview(self.listRemoteViewFix[i])
                         self.listRemoteViewFix[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 160)
@@ -1847,14 +1981,12 @@ class QmeraVideoViewController: UIViewController {
                 }
                 if arrayMessage[5] == "2" && self.dataPerson.count == 1 {
                     DispatchQueue.main.async {
-                        self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 2.0).rotated(by: (CGFloat.pi)/2)
-                        self.zoomView.contentMode = .scaleAspectFit
+                        self.turnZoomView(by: CGFloat.pi / 2, mirrored: true)
                     }
                 }
                 else if self.dataPerson.count == 1 {
                     DispatchQueue.main.async {
-                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (-CGFloat.pi)/2)
-                        self.zoomView.contentMode = .scaleAspectFit
+                        self.turnZoomView(by: -CGFloat.pi / 2)
                     }
                 } else if self.dataPerson.count > 1 {
                     DispatchQueue.main.async {
@@ -2233,6 +2365,7 @@ class QmeraVideoViewController: UIViewController {
             DispatchQueue.main.async {
                 if (self.dataPerson.count > 1) {
                     if (self.dataPerson.count == 2) {
+                        guard self.hasTile(0), self.hasTile(1) else { return }
                         for i in 0...1{
                             self.scrollRemoteView.addSubview(self.listRemoteViewFix[i])
                             self.listRemoteViewFix[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 160)
@@ -2275,6 +2408,7 @@ class QmeraVideoViewController: UIViewController {
                         }
                     } else {
                         let i = self.dataPerson.count - 1
+                        guard self.hasTile(i) else { return }
                         self.scrollRemoteView.addSubview(self.listRemoteViewFix[i])
                         self.listRemoteViewFix[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 160)
                         self.listRemoteViewFix[i].backgroundColor = .white

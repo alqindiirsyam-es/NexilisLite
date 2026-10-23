@@ -5785,7 +5785,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                         "data" : self.complaintId,
                                         "time_end" : date,
                                         "complaint_id" : self.complaintId,
-                                        "members" : "",
+                                        "members" : CallParticipants.contactCenterMembers(ticket: self.complaintId),
                                         "requester": requester
                                     ], replace: true)
                                 } catch {
@@ -5796,6 +5796,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         }
                         self.dismissKeyboard()
                         self.disableEditor()
+                        ContactCenterSession.shared.noteSessionEnded()
                         SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
                         SecureUserDefaults.shared.removeValue(forKey: "membersCC")
                         SecureUserDefaults.shared.removeValue(forKey: "waitingRequestCC")
@@ -7400,9 +7401,34 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     /// that places the same kind of call again. The row goes through audioVideoCall, so every
     /// check that guards a call from the bar - a call already in progress, feature access, the
     /// microphone or camera permission, the network - guards this one too.
+    ///
+    /// A group call's bubble lists everyone else the call had instead, as WhatsApp's does, with
+    /// one row placing the same kind of call to the one picked: the app starts a call with one
+    /// person, not several.
     @objc private func callBubbleTapped(_ sender: UITapGestureRecognizer) {
         guard !listMotion.isMoving(tableChatView) else { return }
-        let video = sender.name == "video"
+        let video = sender.name?.component(0, separatedBy: "|") == "video"
+        let people = CallParticipants.people(ofMessage: sender.name?.component(1, separatedBy: "|") ?? "")
+        if people.count > 1 {
+            let listed = people.map { person -> LinkActionSheetViewController.Person in
+                let user = User.getDataCanNil(pin: person.pin)
+                return LinkActionSheetViewController.Person(pin: person.pin, name: CallParticipants.name(of: person),
+                                                            thumb: user?.thumb ?? "")
+            }
+            let sheet = LinkActionSheetViewController(
+                groupCall: CallParticipants.title(for: listed.map { $0.name }),
+                subtitle: (video ? "Group video call" : "Group audio call").localized() + " · "
+                    + String(format: "%d people".localized(), listed.count),
+                people: listed,
+                call: (title: (video ? "Video call" : "Audio call").localized(),
+                       systemImageName: video ? "video" : "phone",
+                       handler: { [weak self] pin in
+                           let name = listed.first(where: { $0.pin == pin })?.name ?? ""
+                           self?.placeCall(video: video, to: pin, name: name)
+                       }))
+            sheet.presentAsBottomSheet(from: self)
+            return
+        }
         let again = UIBarButtonItem()
         again.tag = video ? 1 : 0
         let row = LinkActionSheetViewController.Action(
@@ -7414,7 +7440,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
 
     @objc func audioVideoCall(sender: UIBarButtonItem) {
-        if sender.tag == 0 {
+        placeCall(video: sender.tag != 0)
+    }
+
+    /// A call to this chat's contact - or, picked from a group call's bubble, to `pin` (`name` is
+    /// what the call knew them by, for someone who is not a contact).
+    private func placeCall(video: Bool, to otherPin: String? = nil, name: String = "") {
+        if !video {
             if APIS.blockedByCallInProgress() {
                 return
             }
@@ -7429,7 +7461,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             // offers Settings when it has been refused for good; and says so when our own call
             // already has the microphone.
             APIS.withCapture(.microphone) { [self] in
-                guard let pin = dataPerson["f_pin"] else {
+                guard let pin = otherPin ?? dataPerson["f_pin"] ?? nil else {
                     return
                 }
                 if !CheckConnection.isConnectedToNetwork() {
@@ -7441,6 +7473,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 }
                 let controller = QmeraAudioViewController()
                 controller.user = User.getData(pin: pin)
+                    ?? (otherPin != nil ? User(pin: pin, firstName: name, lastName: "", thumb: "") : nil)
                 controller.isOutgoing = true
                 controller.modalPresentationStyle = .overCurrentContext
                 present(controller, animated: true, completion: nil)
@@ -7469,7 +7502,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     return
                 }
                 let videoVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
-                videoVC.dataPerson.append(dataPerson)
+                if let otherPin {
+                    videoVC.fPin = otherPin
+                } else {
+                    videoVC.dataPerson.append(dataPerson)
+                }
                 show(videoVC, sender: nil)
             }
         }
@@ -7997,6 +8034,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             textFieldSend.text = ""
             heightTextFieldSend.constant = fieldHeight(for: textFieldSend)
         }
+        // Fix: the field is emptied here in code, which UITextView does not report as a change -
+        // so the paper plane stayed after a message had gone, and the microphone and the video
+        // note camera did not come back until something was typed and deleted again.
+        refreshSendOrRecordButton()
         deleteReplyView()
         deleteLinkPreview()
         listMentionInTextField.removeAll()
@@ -8392,6 +8433,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             return
         }
         ContactCenterSession.shared.retainPending(editor: self, requestToken: requestToken)
+        // A new request: "no officer has answered" may be said for it (see NotificationShare).
+        NotificationShare.noteContactCenterRequest()
         DispatchQueue.global().async {
             let message = CoreMessage_TMessageBank.getRequestCallCenter(p_channel: channel, category_id: service_id)
             message.mBodies["wlc_device"] = "\(UIDevice.current.model)(\(UIDevice.current.name))"
@@ -12031,9 +12074,11 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     // or hand on - only a name and a size. This is the line the whole rule is for.
                     if !FileManager.default.fileExists(atPath: fileURL.path) && !FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
                         return false
-                    } else if !fileChat.isEmpty && spoken.isEmpty {
-                        return false
                     }
+                    // Fix: a document with nothing written under it was refused here for every
+                    // session - forward, delete, and whether its row gets a circle at all - so with
+                    // forwarding switched on it still could not be forwarded. Having no caption only
+                    // matters to Copy, and Copy has already been answered above.
                 }
             }
         }
@@ -14950,12 +14995,15 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             let isImageLeft = CallRecord.status(scope: dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String ?? "", sender: dataMessages[indexPath.row]["f_pin"] as? String ?? "", currentUser: User.getMyPin() ?? "") != "2"
             if !copySession && !forwardSession && !deleteSession && !summarizeSession && !isSearching {
                 let callTap = UITapGestureRecognizer(target: self, action: #selector(callBubbleTapped(_:)))
-                // Which kind of call this bubble records, so the sheet offers the same kind back.
-                callTap.name = isVideo ? "video" : "audio"
+                // Which kind of call this bubble records, so the sheet offers the same kind back,
+                // and which message it is, for a group call's people.
+                callTap.name = (isVideo ? "video" : "audio") + "|" + (dataMessages[indexPath.row][TypeDataMessage.message_id] as? String ?? "")
                 containerCall.addGestureRecognizer(callTap)
             }
             let longCall = textChat.component(1, separatedBy: " at ")
             var subTextCall = longCall
+            // More than one other person on it: a group call - see CallParticipants.
+            let groupPeople = CallParticipants.people(ofMessage: dataMessages[indexPath.row][TypeDataMessage.message_id] as? String ?? "").count
             
             let contIconCall = UIView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
             containerCall.addSubview(contIconCall)
@@ -14989,6 +15037,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 }
             } else if longCall.trimmingCharacters(in: .whitespaces) == "0" {
                 subTextCall = "No answer".localized()
+            }
+            if groupPeople > 1 {
+                textCall = (isVideo ? "Group video call" : "Group audio call").localized()
+                subTextCall = String(format: "%d people".localized(), groupPeople)
+                    + (subTextCall.isEmpty ? "" : " · " + subTextCall)
             }
             
             let iconCall = UIImageView()
@@ -19520,10 +19573,26 @@ final class LinkActionSheetViewController: UIViewController {
         let handler: () -> Void
     }
 
+    /// Someone a group call had, as its sheet lists them.
+    struct Person {
+        let pin: String
+        let name: String
+        let thumb: String
+    }
+
     private let titleText: String
     private let subtitleText: String?
     private let iconSystemName: String?
     private let actions: [Action]
+    /// A group call's people, listed under the title - see init(groupCall:...).
+    private var people: [Person] = []
+    /// The one call a group call's sheet places, to whichever of `people` is picked: the app
+    /// starts a call with one person, never several. None for a Contact Center call, which only
+    /// lists who was there.
+    private var pickedCall: (title: String, systemImageName: String, handler: (String) -> Void)?
+    private var pickedPin: String?
+    private var personRows: [CallPersonRow] = []
+    private var pickedCallRow: LinkActionRow?
     /// Called whenever this sheet leaves the screen, however that happened (an action
     /// was tapped, the close "X" was tapped, or the user swiped/tapped-outside to
     /// dismiss without choosing anything) - lets the presenter (EditorGroup) reliably
@@ -19589,6 +19658,15 @@ final class LinkActionSheetViewController: UIViewController {
         self.init(title: "Select an action".localized(), subtitle: urlString, iconSystemName: "link", actions: actions)
     }
 
+    /// A group call's sheet, as WhatsApp's: who was on it under the title, then one row placing
+    /// the same kind of call to the one picked from them. With no call given it only lists them.
+    convenience init(groupCall title: String, subtitle: String, people: [Person],
+                     call: (title: String, systemImageName: String, handler: (String) -> Void)?) {
+        self.init(title: title, subtitle: subtitle, iconSystemName: "person.2.fill", actions: [])
+        self.people = people
+        self.pickedCall = call
+    }
+
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -19598,6 +19676,20 @@ final class LinkActionSheetViewController: UIViewController {
         view.backgroundColor = .secondarySystemBackground
 
         let header = makeHeader()
+        var cards: [UIView] = []
+        if !people.isEmpty {
+            cards.append(makePeopleCard())
+        }
+        if let call = pickedCall {
+            let row = LinkActionRow(title: call.title, systemImageName: call.systemImageName)
+            row.onTap = { [weak self] in
+                guard let self, let pin = self.pickedPin else { return }
+                self.dismiss(animated: true) { call.handler(pin) }
+            }
+            pickedCallRow = row
+            updatePickedCallRow()
+            cards.append(makeCard(rows: [row]))
+        }
 
         let rows: [LinkActionRow] = actions.map { action in
             let row = LinkActionRow(title: action.title, systemImageName: action.systemImageName)
@@ -19607,13 +19699,15 @@ final class LinkActionSheetViewController: UIViewController {
             return row
         }
 
-        let rowsCard = makeCard(rows: rows)
+        if !rows.isEmpty {
+            cards.append(makeCard(rows: rows))
+        }
 
         contentStack.axis = .vertical
         contentStack.spacing = 16
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         contentStack.addArrangedSubview(header)
-        contentStack.addArrangedSubview(rowsCard)
+        cards.forEach { contentStack.addArrangedSubview($0) }
         view.addSubview(contentStack)
 
         if usesCustomChrome {
@@ -19755,6 +19849,73 @@ final class LinkActionSheetViewController: UIViewController {
         divider.backgroundColor = .separator
         divider.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
         return divider
+    }
+
+    // MARK: - A group call's people
+
+    /// The people, a row each, in a card that scrolls past five and a half of them - the half
+    /// row showing there are more.
+    private func makePeopleCard() -> UIView {
+        let picking = pickedCall != nil
+        personRows = people.map { person in
+            let row = CallPersonRow(person: person, picking: picking)
+            if picking {
+                row.onTap = { [weak self, weak row] in
+                    guard let self, let row else { return }
+                    self.pickedPin = self.pickedPin == person.pin ? nil : person.pin
+                    self.personRows.forEach { $0.isPicked = $0 === row && self.pickedPin != nil }
+                    self.updatePickedCallRow()
+                }
+            }
+            return row
+        }
+        var arranged: [UIView] = []
+        if picking {
+            let hint = UILabel()
+            hint.text = "Choose who to call".localized()
+            hint.font = .systemFont(ofSize: 13)
+            hint.textColor = .secondaryLabel
+            hint.heightAnchor.constraint(equalToConstant: 32).isActive = true
+            arranged.append(hint)
+            arranged.append(makeDivider())
+        }
+        for (index, row) in personRows.enumerated() {
+            if index > 0 { arranged.append(makeDivider()) }
+            arranged.append(row)
+        }
+        let stack = UIStackView(arrangedSubviews: arranged)
+        stack.axis = .vertical
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let scroll = UIScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.showsVerticalScrollIndicator = true
+        scroll.addSubview(stack)
+        let card = UIView()
+        card.backgroundColor = .tertiarySystemBackground
+        card.layer.cornerRadius = 14
+        card.clipsToBounds = true
+        card.addSubview(scroll)
+        let shown = min(CGFloat(personRows.count), 5.5) * CallPersonRow.height + (picking ? 32 : 0)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: card.topAnchor),
+            scroll.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            scroll.heightAnchor.constraint(equalToConstant: shown),
+            stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: scroll.frameLayoutGuide.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: scroll.frameLayoutGuide.trailingAnchor, constant: -16)
+        ])
+        return card
+    }
+
+    /// The call row is there from the start, and answers once someone is picked.
+    private func updatePickedCallRow() {
+        guard let row = pickedCallRow else { return }
+        row.isEnabled = pickedPin != nil
+        row.alpha = pickedPin != nil ? 1 : 0.4
     }
 
     // MARK: - Actions
@@ -19950,6 +20111,70 @@ final class LinkBottomSheetTransitioningDelegate: NSObject, UIViewControllerTran
 }
 
 /// A single tappable "icon + title" row, styled to match the requested link-popup design.
+/// One of a group call's people in its sheet: their picture, their name, and - when the sheet
+/// places a call - the mark saying they are the one it will call.
+private final class CallPersonRow: UIControl {
+    static let height: CGFloat = 56
+    var onTap: (() -> Void)?
+    var isPicked = false {
+        didSet {
+            mark.image = UIImage(systemName: isPicked ? "checkmark.circle.fill" : "circle")
+            mark.tintColor = isPicked ? .systemGreen : .tertiaryLabel
+        }
+    }
+    private let mark = UIImageView()
+
+    init(person: LinkActionSheetViewController.Person, picking: Bool) {
+        super.init(frame: .zero)
+        let picture = UIImageView()
+        picture.contentMode = .scaleAspectFill
+        picture.layer.cornerRadius = 20
+        picture.clipsToBounds = true
+        picture.translatesAutoresizingMaskIntoConstraints = false
+        picture.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        picture.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        picture.setImage(name: person.thumb)
+
+        let label = UILabel()
+        label.text = person.name
+        label.font = .systemFont(ofSize: 17)
+        label.textColor = .label
+
+        mark.isHidden = !picking
+        mark.contentMode = .scaleAspectFit
+        mark.translatesAutoresizingMaskIntoConstraints = false
+        mark.widthAnchor.constraint(equalToConstant: 24).isActive = true
+        isPicked = false
+
+        let stack = UIStackView(arrangedSubviews: [picture, label, mark])
+        stack.axis = .horizontal
+        stack.spacing = 12
+        stack.alignment = .center
+        stack.isUserInteractionEnabled = false
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: Self.height),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        addTarget(self, action: #selector(handleTouchUpInside), for: .touchUpInside)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var isHighlighted: Bool {
+        didSet { alpha = isHighlighted && onTap != nil ? 0.5 : 1.0 }
+    }
+
+    @objc private func handleTouchUpInside() {
+        onTap?()
+    }
+}
+
 private final class LinkActionRow: UIControl {
     var onTap: (() -> Void)?
 

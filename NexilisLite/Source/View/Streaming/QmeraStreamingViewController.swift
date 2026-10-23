@@ -9,6 +9,7 @@ import UIKit
 import nuSDKService
 @_implementationOnly import NotificationBannerSwift
 import AVFAudio
+import AVFoundation
 
 class QmeraStreamingViewController: UIViewController {
     
@@ -96,10 +97,58 @@ class QmeraStreamingViewController: UIViewController {
     }()
     
     lazy var imageView: UIImageView = {
-        let imageView = UIImageView()
-        imageView.contentMode = .scaleAspectFit
+        let imageView = StreamPictureView()
+        // Edge to edge, the picture's own proportions kept and what does not fit cropped off its
+        // edges - the way a video call fills the screen. See fillScreen(turnedBy:).
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
         return imageView
     }()
+
+    /// The round light ground a bar button had - before iOS 26 only. From iOS 26 the bar puts its
+    /// own glass around the button, and the ground showed as a grey disc inside that glass.
+    private static func giveFlatBackground(_ button: UIButton) {
+        if #available(iOS 26.0, *) { return }
+        button.backgroundColor = .white.withAlphaComponent(0.2)
+        button.layer.cornerRadius = 15.0
+    }
+
+    /// The picture's size, against the screen's - swapped while it is turned (fillScreen).
+    private var imageWidth: NSLayoutConstraint?
+    private var imageHeight: NSLayoutConstraint?
+
+    /// Puts the picture over the whole screen, turned a quarter round when the stream hands it
+    /// over lying on its side.
+    ///
+    /// Fix: it was stretched by fixed numbers - 1.9 by 2.2 for a viewer, 1.6 for the broadcaster's
+    /// own camera - over a picture fitted inside the screen. Those fit a screen of about two to one;
+    /// on a taller one - an iPhone 17 Pro - the picture did not reach the edges, and the stretch
+    /// bent it out of its own proportions. As the video call does now (see turnZoomView there): the
+    /// view takes the screen's size, the other way round when it is to be turned, so once turned it
+    /// is exactly the screen, and the picture fills it as it is.
+    private func fillScreen(turnedBy angle: CGFloat = 0) {
+        imageWidth?.isActive = false
+        imageHeight?.isActive = false
+        let turned = angle != 0
+        let width = imageView.widthAnchor.constraint(equalTo: turned ? view.heightAnchor : view.widthAnchor)
+        let height = imageView.heightAnchor.constraint(equalTo: turned ? view.widthAnchor : view.heightAnchor)
+        NSLayoutConstraint.activate([width, height])
+        imageWidth = width
+        imageHeight = height
+        imageView.transform = turned ? CGAffineTransform(rotationAngle: angle) : .identity
+        view.layoutIfNeeded()
+        imageView.layer.setNeedsLayout()
+    }
+
+    /// The SDK adds the broadcaster's camera preview on the main queue some moment after it is
+    /// asked to (see StreamPictureView); laid out again once it is likely there.
+    private func fillPreviewSoon() {
+        for delay in [0.2, 0.6, 1.5] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.imageView.layer.setNeedsLayout()
+            }
+        }
+    }
     
     lazy var tableView: UITableView = {
         let tableView = UITableView()
@@ -258,6 +307,9 @@ class QmeraStreamingViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        // Before the SDK builds the stream's audio, so that leaving it cannot crash - see
+        // AudioEngineNodeGuard.
+        AudioEngineNodeGuard.install()
         // A new stream: its audio watch may run once it has been joined.
         QmeraStreamingViewController.audioWatchQueue.async { QmeraStreamingViewController.audioWatchStopped = false }
         // And its sound starts on the speaker, which is what the button and the session below
@@ -271,8 +323,7 @@ class QmeraStreamingViewController: UIViewController {
         let buttonBack = UIButton()
         buttonBack.frame = CGRect(x:0, y:0, width:30, height:30)
         buttonBack.setImage(UIImage(systemName: "chevron.backward")?.withTintColor(.mainColor, renderingMode: .alwaysOriginal), for: .normal)
-        buttonBack.backgroundColor = .white.withAlphaComponent(0.2)
-        buttonBack.layer.cornerRadius = 15.0
+        QmeraStreamingViewController.giveFlatBackground(buttonBack)
         buttonBack.addTarget(self, action: #selector(close(sender:)), for: .touchUpInside)
         navigationItem.leftBarButtonItem = UIBarButtonItem(customView: buttonBack)
         
@@ -316,7 +367,12 @@ class QmeraStreamingViewController: UIViewController {
         keyboardTopAnchorConstraint.isActive = true
         keyboardLayoutGuide.bottomAnchor.constraint(equalTo: view.layoutMarginsGuide.bottomAnchor).isActive = true
         
-        imageView.anchor(top: view.topAnchor, left: view.leftAnchor, bottom: view.bottomAnchor, right: view.rightAnchor)
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            imageView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            imageView.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+        fillScreen()
         
         taglineView.backgroundColor = .clear
         taglineView.addSubview(tagline)
@@ -351,18 +407,21 @@ class QmeraStreamingViewController: UIViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(onUpdateTitleOrTagline(notification:)), name: NSNotification.Name(rawValue: "liveStreamingUpdate"), object: nil)
         
         Nexilis.shared.streamingDelagate = self
+        // A viewer only listens: the stream's sound without a call's voice processing - see
+        // StreamViewerAudio.
+        StreamViewerAudio.setWatching(!isLive)
         self.backToDefaultAudioSession()
         UIApplication.shared.isIdleTimerDisabled = true
         if isLive {
             let buttonRotate = UIButton()
             buttonRotate.frame = CGRect(x:0, y:0, width:30, height:30)
             buttonRotate.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera")?.withTintColor(.mainColor, renderingMode: .alwaysOriginal), for: .normal)
-            buttonRotate.backgroundColor = .white.withAlphaComponent(0.2)
-            buttonRotate.layer.cornerRadius = 15.0
+            QmeraStreamingViewController.giveFlatBackground(buttonRotate)
             buttonRotate.addTarget(self, action: #selector(camera(sender:)), for: .touchUpInside)
             navigationItem.rightBarButtonItem = UIBarButtonItem(customView: buttonRotate)
             
             API.initiateBC(sTitle: data, nCamIdx: 0, nResIdx: 2, nVQuality: 4, ivLocalView: imageView)
+            fillPreviewSoon()
         } else {
             API.joinBC(sBroadcasterID: data, ivRemoteView: imageView)
         }
@@ -431,6 +490,7 @@ class QmeraStreamingViewController: UIViewController {
             DispatchQueue.global().async {
                 QmeraStreamingViewController.stopAudioWatch()
                 API.terminateBC(sBroadcasterID: self?.isLive ?? true ? nil : self?.data)
+                StreamViewerAudio.setWatching(false)
                 self?.sendLeft()
             }
             self?.navigationController?.dismiss(animated: true, completion: nil)
@@ -442,9 +502,11 @@ class QmeraStreamingViewController: UIViewController {
         if frontCamera {
             API.changeCameraParam(nCameraIdx: 0, nResolutionIndex: 2, nQuality: 4)
             frontCamera = false
+            fillPreviewSoon()
         } else {
             API.changeCameraParam(nCameraIdx: 1, nResolutionIndex: 2, nQuality: 4)
             frontCamera = true
+            fillPreviewSoon()
         }
     }
     
@@ -545,6 +607,8 @@ class QmeraStreamingViewController: UIViewController {
     }
     
     deinit {
+        // However the screen went - a call after this must get its voice processing back.
+        StreamViewerAudio.setWatching(false)
         if !isLive {
             NotificationCenter.default.removeObserver(self)
         }
@@ -739,7 +803,7 @@ extension QmeraStreamingViewController: LiveStreamingDelegate {
     func onStartLS(state: Int, message: String) {
         if state == Nexilis.OUTGOING_CALL, message.contains("Initiating") {
             DispatchQueue.main.async {
-                self.imageView.transform = CGAffineTransform.init(scaleX: 1.6, y: 1.6)
+                self.fillScreen()
             }
         } else if state == 12 {
             sendLive()
@@ -755,11 +819,11 @@ extension QmeraStreamingViewController: LiveStreamingDelegate {
             let platform = Int(m[3])
             if platform == 1 { // Android
                 DispatchQueue.main.async {
-                    self.imageView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: camera == 1 ? (CGFloat.pi * 3)/2 : (CGFloat.pi)/2)
+                    self.fillScreen(turnedBy: camera == 1 ? (CGFloat.pi * 3)/2 : (CGFloat.pi)/2)
                 }
             } else {
                 DispatchQueue.main.async {
-                    self.imageView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: camera == 1 ? (CGFloat.pi * 5)/2 : (CGFloat.pi)/2)
+                    self.fillScreen(turnedBy: camera == 1 ? (CGFloat.pi * 5)/2 : (CGFloat.pi)/2)
                 }
             }
             sendJoin()
@@ -823,16 +887,19 @@ extension QmeraStreamingViewController: LiveStreamingDelegate {
             let platform = Int(m[3])
             if platform == 1 { // Android
                 DispatchQueue.main.async {
-                    self.imageView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: camera == 1 ? (CGFloat.pi * 3)/2 : (CGFloat.pi)/2)
+                    self.fillScreen(turnedBy: camera == 1 ? (CGFloat.pi * 3)/2 : (CGFloat.pi)/2)
                 }
             } else {
                 DispatchQueue.main.async {
-                    self.imageView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: camera == 1 ? (CGFloat.pi * 5)/2 : (CGFloat.pi)/2)
+                    self.fillScreen(turnedBy: camera == 1 ? (CGFloat.pi * 5)/2 : (CGFloat.pi)/2)
                 }
             }
         } else if state == Nexilis.STREAMING_SEMINAR_ENDED {
             // The stream is over: no more restarting its audio.
-            DispatchQueue.global().async { QmeraStreamingViewController.stopAudioWatch() }
+            DispatchQueue.global().async {
+                QmeraStreamingViewController.stopAudioWatch()
+                StreamViewerAudio.setWatching(false)
+            }
             DispatchQueue.main.async {
                 self.status.text = "Streaming ended".localized()
                 let size = self.status.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: self.status.frame.height))
@@ -901,4 +968,34 @@ class StreamingChat: Model {
         return ""
     }
     
+}
+
+/// The stream's picture. Also where the SDK puts the broadcaster's own camera - not as an image but
+/// as an AVCaptureVideoPreviewLayer it adds on top, sized to the view as it was at that moment and
+/// fitted inside it (MediaC2C.startCamera, and again on every camera switch).
+///
+/// Fix: the broadcaster's own picture sat in a band across the middle of the screen of an iPhone 17
+/// Pro, the app's background above and below it. Each layout here fills the preview the way the
+/// picture itself is filled: the view's whole size, its proportions kept, the edges cropped.
+///
+/// Nothing here asks for another layout: UIView's layoutSublayers(of:) is what runs layoutSubviews,
+/// so a layout asked for from in here never ends - the screen froze on starting a stream. The
+/// preview is only changed when it is not already right, and a change to a sublayer does not lay
+/// this one out again.
+final class StreamPictureView: UIImageView {
+    override func layoutSublayers(of layer: CALayer) {
+        super.layoutSublayers(of: layer)
+        guard layer === self.layer else { return }
+        for preview in layer.sublayers?.compactMap({ $0 as? AVCaptureVideoPreviewLayer }) ?? [] {
+            if preview.videoGravity != .resizeAspectFill {
+                preview.videoGravity = .resizeAspectFill
+            }
+            if preview.frame != layer.bounds {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                preview.frame = layer.bounds
+                CATransaction.commit()
+            }
+        }
+    }
 }

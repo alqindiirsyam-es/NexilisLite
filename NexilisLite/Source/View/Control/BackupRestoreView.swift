@@ -278,47 +278,69 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                         
                     }
                 } else {
-                    Download().startHTTP(forKey: getFileName(option: optionBackup, fileId: fileIdBackup), isBackup: true) { (name, progress) in
-                        DispatchQueue.main.async { [self] in
-                            guard progress == 100 else {
-                                if progress != -100 {
-                                    let formatter = NumberFormatter()
-                                    formatter.minimumFractionDigits = 1
-                                    formatter.maximumFractionDigits = 1
-                                    
-                                    var prog = ""
-                                    if let formatted = formatter.string(from: NSNumber(value: progress)) {
-                                        prog = formatted
-                                    }
-                                    labelRestoring.text = "Downloading...".localized() + "  \(prog)%"
-                                } else {
-                                    labelRestoring.text = "Failed Restored Data".localized()
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
-                                        self.isRestoreStart = false
-                                        tableView.reloadRows(at: [indexPath, IndexPath(row: 1, section: 1), IndexPath(row: 0, section: 0), IndexPath(row: 0, section: 2)], with: .none)
-                                        tableView.reloadSections(IndexSet(integer: 3), with: .none)
-                                    })
-                                }
-                                return
+                    downloadBackup(fileURL: fileURL, dirPath: dirPath, indexPath: indexPath, attempt: 1)
+                }
+            }
+        }
+    }
+
+    /// How many times the backup is asked for before the restore is given up.
+    private static let backupDownloadAttempts = 5
+
+    /// Fetches the backup and restores it, trying again a few times before saying it failed.
+    ///
+    /// Fix: on a fresh install, straight after signing in, the first few Restore Now taps all
+    /// ended in "Failed Restored Data" and the fifth one worked. The download goes out with the
+    /// session's cookies, the ZTA authorisation and the server's address as they are at that
+    /// moment, and right after a sign-in they are still being settled - the server turns the
+    /// request away, and one refusal was the end of it. It is asked for again, a couple of seconds
+    /// apart, and only the last failure is reported - with its reason, read back off the screen.
+    private func downloadBackup(fileURL: URL, dirPath: String, indexPath: IndexPath, attempt: Int) {
+        let fileName = getFileName(option: optionBackup, fileId: fileIdBackup)
+        Download().startHTTP(forKey: fileName, isBackup: true) { (name, progress) in
+            DispatchQueue.main.async { [self] in
+                guard progress == 100 else {
+                    if progress != -100 {
+                        let formatter = NumberFormatter()
+                        formatter.minimumFractionDigits = 1
+                        formatter.maximumFractionDigits = 1
+
+                        var prog = ""
+                        if let formatted = formatter.string(from: NSNumber(value: progress)) {
+                            prog = formatted
+                        }
+                        labelRestoring.text = "Downloading...".localized() + "  \(prog)%"
+                    } else if attempt < Self.backupDownloadAttempts {
+                        labelRestoring.text = "Downloading...".localized()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                            self?.downloadBackup(fileURL: fileURL, dirPath: dirPath, indexPath: indexPath, attempt: attempt + 1)
+                        }
+                    } else {
+                        let reason = Download.failureReason(for: fileName).map { " (\($0))" } ?? ""
+                        labelRestoring.text = "Failed Restored Data".localized() + reason
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: {
+                            self.isRestoreStart = false
+                            tableView.reloadRows(at: [indexPath, IndexPath(row: 1, section: 1), IndexPath(row: 0, section: 0), IndexPath(row: 0, section: 2)], with: .none)
+                            tableView.reloadSections(IndexSet(integer: 3), with: .none)
+                        })
+                    }
+                    return
+                }
+                labelRestoring.text = "Restoring...".localized()
+                if FileEncryption.shared.isSecureExists(filename: fileName) {
+                    do {
+                        if var data = try FileEncryption.shared.readSecure(filename: fileName) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                            if dataDecrypt != nil {
+                                data = dataDecrypt!
                             }
-                            labelRestoring.text = "Restoring...".localized()
-                            if FileEncryption.shared.isSecureExists(filename: getFileName(option: optionBackup, fileId: fileIdBackup)) {
-                                do {
-                                    if var data = try FileEncryption.shared.readSecure(filename: getFileName(option: optionBackup, fileId: fileIdBackup)) {
-                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
-                                        if dataDecrypt != nil {
-                                            data = dataDecrypt!
-                                        }
-                                        try data.write(to: fileURL)
-                                        DispatchQueue.global().async {
-                                            self.restoreData(file: fileURL, dirPath: dirPath, indexPath: indexPath)
-                                        }
-                                    }
-                                } catch {
-                                    
-                                }
+                            try data.write(to: fileURL)
+                            DispatchQueue.global().async {
+                                self.restoreData(file: fileURL, dirPath: dirPath, indexPath: indexPath)
                             }
                         }
+                    } catch {
+
                     }
                 }
             }
@@ -561,12 +583,13 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
         var pin = dataUcList[0]
         var lastMessageId = ""
         if pin == User.getMyPin() {
+            // Fix: the row was stepped past twice - next() in the condition and once more inside -
+            // so the one row a message id has was always skipped and the conversation was never
+            // worked out.
             if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, l_pin from MESSAGE where message_id = '\(dataUcList[1])'"), cursor.next() {
-                if cursor.next() {
-                    let fPin = cursor.string(forColumnIndex: 0) ?? ""
-                    let lPin = cursor.string(forColumnIndex: 1) ?? ""
-                    pin = fPin == User.getMyPin() ? lPin : fPin
-                }
+                let fPin = cursor.string(forColumnIndex: 0) ?? ""
+                let lPin = cursor.string(forColumnIndex: 1) ?? ""
+                pin = fPin == User.getMyPin() ? lPin : fPin
                 cursor.close()
             }
         } else {
@@ -690,6 +713,15 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
 
             let corrupted = recordSizeRestore < expected
             RestoreProgressManager.shared.finish()
+            // Fix: the chat lists were never told. What was restored went into the database and
+            // stayed out of sight until something else happened to reload them - with
+            // conversations already there that came soon enough, but from an empty list nothing
+            // did: it went on saying "There are no conversations", and the restore looked as if it
+            // had failed. They read the database again now, and the icon's count with them.
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+            }
+            APIS.refreshApplicationBadgeSoon()
             DispatchQueue.main.async { [self] in
                 labelRestoring.text = corrupted
                     ? "Backup files are corrupted".localized()

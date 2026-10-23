@@ -137,7 +137,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     var complaintId = ""
     /// A Call Center session held as a call: what kind, and when it began and ended (ms). Its
     /// history shows the call as a row of its own - see historyCallRow.
-    var historyCall: (isVideo: Bool, start: Int64, end: Int64, officer: String, requester: String)?
+    /// `members` is the call's people when it was a group call - see CallParticipants.
+    var historyCall: (isVideo: Bool, start: Int64, end: Int64, officer: String, requester: String, members: String)?
     static let historyCallPrefix = "CCCALL_"
     var counter = 0
     var markerCounter: String?
@@ -4149,6 +4150,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         row["chat_date"] = chatDate(stringDate: "\(start)")
         row["isSelected"] = false
         row["progress"] = 0.0
+        row["message_large_text"] = call.members
         return row
     }
 
@@ -4196,6 +4198,13 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         let isImageLeft = CallRecord.status(scope: scope, sender: row["f_pin"] as? String ?? "", currentUser: User.getMyPin() ?? "") != "2"
         let longCall = textChat.component(1, separatedBy: " at ")
         var subTextCall = longCall
+        // More than one other person on it: a group call, whose people a tap lists - and only
+        // lists: a Call Center history calls nobody back.
+        let people = CallParticipants.people(in: row["message_large_text"] as? String)
+        if people.count > 1 {
+            historyCallPeople = people
+            containerCall.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(historyCallTapped)))
+        }
 
         let contIconCall = UIView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
         containerCall.addSubview(contIconCall)
@@ -4221,6 +4230,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         } else if longCall.trimmingCharacters(in: .whitespaces) == "0" {
             subTextCall = "No answer".localized()
         }
+        if people.count > 1 {
+            textCall = (isVideo ? "Group video call" : "Group audio call").localized()
+            subTextCall = String(format: "%d people".localized(), people.count)
+                + (subTextCall.isEmpty ? "" : " · " + subTextCall)
+        }
 
         let iconCall = UIImageView()
         iconCall.image = UIImage(systemName: imageCall, withConfiguration: UIImage.SymbolConfiguration(pointSize: 18))
@@ -4240,6 +4254,25 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         subtitleCall.text = subTextCall
         subtitleCall.font = .systemFont(ofSize: 13)
         subtitleCall.textColor = .gray
+    }
+
+    /// The people of the session's group call, for historyCallTapped.
+    private var historyCallPeople: [CallParticipants.Person] = []
+
+    /// Everyone else the session's group call had, with nothing to call them from.
+    @objc private func historyCallTapped() {
+        guard !historyCallPeople.isEmpty else { return }
+        let listed = historyCallPeople.map { person in
+            LinkActionSheetViewController.Person(pin: person.pin, name: CallParticipants.name(of: person),
+                                                 thumb: User.getDataCanNil(pin: person.pin)?.thumb ?? "")
+        }
+        let video = historyCall?.isVideo ?? false
+        let sheet = LinkActionSheetViewController(
+            groupCall: CallParticipants.title(for: listed.map { $0.name }),
+            subtitle: (video ? "Group video call" : "Group audio call").localized() + " · "
+                + String(format: "%d people".localized(), listed.count),
+            people: listed, call: nil)
+        sheet.presentAsBottomSheet(from: self)
     }
 
     /// The day headers, in the order the messages themselves are in.
@@ -7392,6 +7425,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             textFieldSend.text = ""
             heightTextFieldSend.constant = fieldHeight(for: textFieldSend)
         }
+        // Fix: the field is emptied here in code, which UITextView does not report as a change -
+        // so the paper plane stayed after a message had gone, and the microphone and the video
+        // note camera did not come back until something was typed and deleted again.
+        refreshSendOrRecordButton()
         deleteReplyView()
         deleteLinkPreview()
         listMentionInTextField.removeAll()
@@ -11277,9 +11314,11 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     // or hand on - only a name and a size. This is the line the whole rule is for.
                     if !FileManager.default.fileExists(atPath: fileURL.path) && !FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
                         return false
-                    } else if !fileChat.isEmpty && spoken.isEmpty {
-                        return false
                     }
+                    // Fix: a document with nothing written under it was refused here for every
+                    // session - forward, delete, and whether its row gets a circle at all - so with
+                    // forwarding switched on it still could not be forwarded. Having no caption only
+                    // matters to Copy, and Copy has already been answered above.
                 }
             }
         }

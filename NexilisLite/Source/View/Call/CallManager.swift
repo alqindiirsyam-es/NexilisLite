@@ -15,9 +15,72 @@ import Combine
 public class CallManager: NSObject, ObservableObject {
     
     public static let shared = CallManager()
-    var activeCalls: [UUID: CallInfo] = [:]
+    var activeCalls: [UUID: CallInfo] = [:] {
+        didSet {
+            callBookLock.lock()
+            hasActiveCallsFlag = !activeCalls.isEmpty
+            callBookLock.unlock()
+        }
+    }
+    private let callBookLock = NSLock()
+    private var hasActiveCallsFlag = false
+
+    /// Whether the system has a call of this app's on its books - readable from any thread, which
+    /// `activeCalls` is not: it is changed on the main thread, and the call screens ask from
+    /// background ones.
+    public var hasActiveCalls: Bool {
+        callBookLock.lock()
+        defer { callBookLock.unlock() }
+        return hasActiveCallsFlag
+    }
     private var pendingAcceptCallChecks: Set<UUID> = []
     private var deferredAnswerActions: [UUID: CXAnswerCallAction] = [:]
+
+    // MARK: - The call's audio session
+
+    /// Whether CallKit has handed the call's audio session over (provider(_:didActivate:)).
+    ///
+    /// Fix: a call answered from the lock screen or with the app swiped away crashed in the call
+    /// SDK two seconds after it was picked up - on iOS 15 every time. The answer was fulfilled with
+    /// the audio session never set up for a call, the call screen then activated it by itself (and
+    /// as mixable), and the SDK started its audio engine on a session that was not the call's: iOS
+    /// refused it (cannotInterruptOthers, a format of 0 Hz) and the SDK trapped. CallKit is the one
+    /// that activates a call's audio; the session is only prepared when the call is answered, and
+    /// the SDK is only started once this is true - see whenCallAudioActive.
+    public private(set) var isCallAudioActive = false
+    /// Keyed, so one that is answered by its timeout can be taken off again. Fix: a waiter that
+    /// timed out stayed on the list until the next activation - and it holds the call screen that
+    /// asked, so that screen outlived its call: the app went on believing a video call was in
+    /// progress and turned every new call away ("A video call is in progress").
+    private var callAudioWaiters: [UUID: () -> Void] = [:]
+
+    /// Runs `work` on the main thread once CallKit has activated the call's audio session - at once
+    /// if it already has - or after `timeout` if it never says so.
+    public func whenCallAudioActive(timeout: TimeInterval = 3, _ work: @escaping () -> Void) {
+        DispatchQueue.main.async {
+            if self.isCallAudioActive {
+                work()
+                return
+            }
+            let key = UUID()
+            self.callAudioWaiters[key] = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
+                guard let waiting = self?.callAudioWaiters.removeValue(forKey: key) else { return }
+                NexilisCallDiagnostics.record("callkit.audio.timeout")
+                waiting()
+            }
+        }
+    }
+
+    /// The audio session a call needs, set before CallKit activates it - never activated here.
+    static func prepareCallAudioSession(video: Bool) {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: video ? .videoChat : .voiceChat,
+                                                            options: [.allowBluetoothHFP])
+        } catch {
+            NexilisCallDiagnostics.record("callkit.audio.category.failed")
+        }
+    }
     private var policyRejectedSocketCalls: Set<String> = []
     private var contactCenterTickets: [UUID: String] = [:]
     private var contactCenterTimeouts: [UUID: DispatchWorkItem] = [:]
@@ -421,6 +484,19 @@ public class CallManager: NSObject, ObservableObject {
 }
 
 extension CallManager: CXProviderDelegate {
+
+    public func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+        NexilisCallDiagnostics.record("callkit.audio.activated")
+        isCallAudioActive = true
+        let waiters = callAudioWaiters.values
+        callAudioWaiters.removeAll()
+        waiters.forEach { $0() }
+    }
+
+    public func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+        NexilisCallDiagnostics.record("callkit.audio.deactivated")
+        isCallAudioActive = false
+    }
     public func providerDidReset(_ provider: CXProvider) {
         NexilisCallDiagnostics.record("callkit.provider.reset active=\(activeCalls.count)")
         for ticket in Set(contactCenterTickets.values) {
@@ -444,6 +520,10 @@ extension CallManager: CXProviderDelegate {
             action.fail()
             return
         }
+        // The call's audio session, set up before CallKit activates it (see isCallAudioActive). What
+        // was said about the last call's session no longer holds: this one waits for its own.
+        isCallAudioActive = false
+        CallManager.prepareCallAudioSession(video: pending.isVideo)
         // Fix: fulfilled up front. Both of the early returns below - the ones that dismiss an
         // alert before presenting - skipped the single fulfil at the end of this method, so on
         // those routes the system was left waiting for an answer that never came and timed the
@@ -500,11 +580,18 @@ extension CallManager: CXProviderDelegate {
                 }
                 let receiveAfterPresentation: () -> Void = { [weak self] in
                     if callInfo.answersOverSocket {
-                        guard let current = self?.activeCalls[uuid], current.isAccepted,
-                              !current.isEndingLocally else { return }
-                        // The controller must register its status observers before the SDK
-                        // can synchronously report OFFHOOK/END during receiveCCall.
-                        API.receiveCCall(sParty: callInfo.callerId)
+                        // Fix: a call ringing over the live connection and answered on the system's
+                        // screen started the SDK's audio at once - before CallKit had handed the
+                        // session over - and on iOS 15 the SDK crashed ('!pri'), the second call
+                        // after another most of all. It waits for the session, as the push path
+                        // does (see isCallAudioActive).
+                        self?.whenCallAudioActive {
+                            guard let current = self?.activeCalls[uuid], current.isAccepted,
+                                  !current.isEndingLocally else { return }
+                            // The controller must register its status observers before the SDK
+                            // can synchronously report OFFHOOK/END during receiveCCall.
+                            API.receiveCCall(sParty: callInfo.callerId)
+                        }
                     }
                 }
                 controller.modalPresentationStyle = .overCurrentContext

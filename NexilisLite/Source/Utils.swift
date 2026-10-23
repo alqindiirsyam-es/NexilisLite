@@ -47,6 +47,110 @@ enum CallRecord {
     }
 }
 
+/// Everyone else a call had, so a call with more than one of them is recorded as a group call -
+/// the way WhatsApp records one: "Group call, N people", and a tap lists who they were.
+///
+/// The call screens drop people from their own lists as they leave, so by the time a call is saved
+/// those lists are empty; this is filled as people come in and never loses anyone. A group call
+/// keeps the list in its MESSAGE row's message_large_text, which a call row leaves empty; a Contact
+/// Center call keeps it in CALL_CENTER_HISTORY's members, which was never filled either.
+struct CallParticipants {
+    struct Person: Codable, Equatable {
+        let pin: String
+        var name: String
+    }
+
+    private(set) var people: [Person] = []
+
+    /// More than one other person: a group call.
+    var isGroup: Bool { people.count > 1 }
+
+    mutating func add(pin: String, name: String?) {
+        let pin = pin.trimmingCharacters(in: .whitespaces)
+        guard !pin.isEmpty, pin != User.getMyPin() else { return }
+        let name = (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if let index = people.firstIndex(where: { $0.pin == pin }) {
+            if people[index].name.isEmpty { people[index].name = name }
+            return
+        }
+        people.append(Person(pin: pin, name: name))
+    }
+
+    private struct Stored: Codable { let call_people: [Person] }
+
+    /// What a group call stores; nothing for a call with one other person, which stays as it was.
+    var stored: String {
+        guard isGroup, let data = try? JSONEncoder().encode(Stored(call_people: people)) else { return "" }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    /// The people a stored group call had; none for anything else.
+    static func people(in stored: String?) -> [Person] {
+        guard let stored, stored.hasPrefix("{"), let data = stored.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(Stored.self, from: data) else { return [] }
+        return decoded.call_people
+    }
+
+    /// The names together, as a group call's sheet heads them: "Anisah & Mama", "A, B & C".
+    static func title(for names: [String]) -> String {
+        guard names.count > 1 else { return names.first ?? "" }
+        return names.dropLast().joined(separator: ", ") + " & " + (names.last ?? "")
+    }
+
+    /// A person's name as the contacts have it now, else the name the call knew.
+    static func name(of person: Person) -> String {
+        if let user = User.getDataCanNil(pin: person.pin), !user.fullName.trimmingCharacters(in: .whitespaces).isEmpty {
+            return user.fullName
+        }
+        return person.name.isEmpty ? person.pin : person.name
+    }
+
+    private static let lock = NSLock()
+    private static var savedPeople: [String: [Person]] = [:]
+
+    /// The people a saved call row had - none unless it was a group call. A row is never rewritten
+    /// once saved, so what is read once is kept.
+    static func people(ofMessage messageId: String) -> [Person] {
+        guard !messageId.isEmpty else { return [] }
+        lock.lock()
+        if let known = savedPeople[messageId] { lock.unlock(); return known }
+        lock.unlock()
+        var stored: String?
+        var read = false
+        Database.shared.database?.inTransaction { fmdb, _ in
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_large_text FROM MESSAGE WHERE message_id = '\(messageId)'") {
+                read = true
+                if cursor.next() { stored = cursor.string(forColumnIndex: 0) }
+                cursor.close()
+            }
+        }
+        let people = people(in: stored)
+        // Not kept when nothing could be read (offline in a mode that blocks reading).
+        if read {
+            lock.lock(); savedPeople[messageId] = people; lock.unlock()
+        }
+        return people
+    }
+
+    private static var contactCenterPeople: [String: CallParticipants] = [:]
+
+    /// Someone on a Contact Center session's call. Kept per ticket, so whichever place writes the
+    /// session's history - the session ending, a call screen closing - has them all.
+    static func noteContactCenter(ticket: String, pin: String, name: String?) {
+        guard !ticket.isEmpty else { return }
+        lock.lock(); defer { lock.unlock() }
+        var participants = contactCenterPeople[ticket] ?? CallParticipants()
+        participants.add(pin: pin, name: name)
+        contactCenterPeople[ticket] = participants
+    }
+
+    /// CALL_CENTER_HISTORY's members for a session: its group call's people, or nothing.
+    static func contactCenterMembers(ticket: String) -> String {
+        lock.lock(); defer { lock.unlock() }
+        return contactCenterPeople[ticket]?.stored ?? ""
+    }
+}
+
 /// A thumbnail made from the picture itself, for a message whose own thumbnail cannot be had.
 ///
 /// Fix: a picture whose thumbnail file would not decode - or could not be downloaded - showed as an
@@ -182,6 +286,102 @@ final class AudioEngineWatch {
         lock.lock(); stopped = true; running = false; lock.unlock()
         guard let teardown = teardown else { return }
         queue.async { DispatchQueue.main.async(execute: teardown) }
+    }
+}
+
+/// Keeps the SDK from taking apart, a second time, an audio node it has already taken apart.
+///
+/// Fix: a viewer leaving a live stream crashed (SIGABRT, AVAE_RaiseException from
+/// -[AVAudioEngine disconnectNodeOutput:]). nuSDKService's MediaBR.stopIncAV stops each stream
+/// player - cAudioPlayer.stopAudio disconnects its node and detaches it from the engine - and then
+/// lets the player go, and the player's deinit calls stopAudio again: the node is no longer the
+/// engine's, and AVAudioEngine raises an Objective-C exception from inside a dispatch_sync, where
+/// nothing can catch it. The SDK is a binary, so the engine is taught here to let go only of a node
+/// that is still its own; for a node that is, nothing changes.
+enum AudioEngineNodeGuard {
+    static func install() { _ = installed }
+
+    private static let installed: Void = {
+        let engine: AnyClass = AVAudioEngine.self
+        let pairs: [(Selector, Selector)] = [
+            (#selector(AVAudioEngine.disconnectNodeOutput(_:) as (AVAudioEngine) -> (AVAudioNode) -> Void),
+             #selector(AVAudioEngine.nx_guardedDisconnectNodeOutput(_:))),
+            (#selector(AVAudioEngine.disconnectNodeInput(_:) as (AVAudioEngine) -> (AVAudioNode) -> Void),
+             #selector(AVAudioEngine.nx_guardedDisconnectNodeInput(_:))),
+            (#selector(AVAudioEngine.detach(_:)), #selector(AVAudioEngine.nx_guardedDetachNode(_:)))
+        ]
+        for (original, guarded) in pairs {
+            guard let originalMethod = class_getInstanceMethod(engine, original),
+                  let guardedMethod = class_getInstanceMethod(engine, guarded) else { continue }
+            method_exchangeImplementations(originalMethod, guardedMethod)
+        }
+    }()
+}
+
+/// While somebody only watches a live stream, the SDK's audio plays without voice processing.
+///
+/// Fix: a viewer heard the broadcaster faintly, under louder noise, speaker or not. The SDK plays
+/// a stream through the same engine set up as a call's - voice processing on the input and output
+/// (MediaBR.cAudioPlayer.startAudio, and again in restartAudioEngine): the phone-call chain, which
+/// turns what it plays down and works on it as one side of a conversation, and opens the viewer's
+/// microphone for nobody to hear. A viewer is not in a conversation. The SDK is a binary, so the
+/// request is answered here: voice processing stays off while `isWatching`, and everything else -
+/// a call, the broadcaster's own stream - is untouched.
+enum StreamViewerAudio {
+    private static let lock = NSLock()
+    private static var watching = false
+
+    static var isWatching: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return watching
+    }
+
+    /// On before joining a stream as a viewer, off once it has been left.
+    static func setWatching(_ on: Bool) {
+        _ = installed
+        lock.lock(); watching = on; lock.unlock()
+    }
+
+    private static let installed: Void = {
+        let original = #selector(AVAudioIONode.setVoiceProcessingEnabled(_:))
+        let replacement = #selector(AVAudioIONode.nx_setVoiceProcessingEnabled(_:))
+        // On both nodes: either may answer the call itself rather than through AVAudioIONode.
+        for node in [AVAudioInputNode.self, AVAudioOutputNode.self] as [AnyClass] {
+            guard let originalMethod = class_getInstanceMethod(node, original),
+                  let replacementMethod = class_getInstanceMethod(node, replacement) else { continue }
+            if class_addMethod(node, original, method_getImplementation(replacementMethod), method_getTypeEncoding(replacementMethod)) {
+                class_replaceMethod(node, replacement, method_getImplementation(originalMethod), method_getTypeEncoding(originalMethod))
+            } else {
+                method_exchangeImplementations(originalMethod, replacementMethod)
+            }
+        }
+    }()
+}
+
+extension AVAudioIONode {
+    // Runs in place of setVoiceProcessingEnabled once StreamViewerAudio is installed; the call to
+    // itself inside reaches the original.
+    @objc fileprivate func nx_setVoiceProcessingEnabled(_ enabled: Bool) throws {
+        try nx_setVoiceProcessingEnabled(enabled && !StreamViewerAudio.isWatching)
+    }
+}
+
+extension AVAudioEngine {
+    // After AudioEngineNodeGuard swaps them, each of these runs in place of the original, and the
+    // call to itself inside reaches the original.
+    @objc fileprivate func nx_guardedDisconnectNodeOutput(_ node: AVAudioNode) {
+        guard node.engine === self else { return }
+        nx_guardedDisconnectNodeOutput(node)
+    }
+
+    @objc fileprivate func nx_guardedDisconnectNodeInput(_ node: AVAudioNode) {
+        guard node.engine === self else { return }
+        nx_guardedDisconnectNodeInput(node)
+    }
+
+    @objc fileprivate func nx_guardedDetachNode(_ node: AVAudioNode) {
+        guard node.engine === self else { return }
+        nx_guardedDetachNode(node)
     }
 }
 
@@ -7709,6 +7909,31 @@ final class ContactCenterSession {
         closing?.closeContactCenterPresentation()
     }
 
+    /// When the last Contact Center session was ended here.
+    private var lastEndedAt: Date?
+
+    /// Said wherever the marks of a session are taken away outside end(ticket:) - a call screen
+    /// closing it, the session cleared on its own - so a call saved a moment later still knows it
+    /// was the session's (see ownsCallsEndingNow).
+    func noteSessionEnded() {
+        // Only for a session there actually was: these marks are also cleared where there is none
+        // (every launch, from destroyAll), and an ordinary call saved just after must not be lost.
+        if context != nil {
+            lastEndedAt = Date()
+        }
+    }
+
+    /// Whether a call ending now belongs to a Contact Center session - one under way, or one that
+    /// has only just been ended. Such a call is recorded in CALL_CENTER_HISTORY and must not also go
+    /// down as an ordinary call in a conversation (see Nexilis.saveMessageCall).
+    var ownsCallsEndingNow: Bool {
+        if context != nil {
+            return true
+        }
+        guard let ended = lastEndedAt else { return false }
+        return Date().timeIntervalSince(ended) < 10
+    }
+
     var context: ContactCenterContext? {
         let raw: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
         let channel: String = SecureUserDefaults.shared.value(forKey: "channelCC") ?? ""
@@ -8001,6 +8226,9 @@ final class ContactCenterSession {
 
     func end(ticket: String, notifyServer: Bool, status: String = ContactCenterSession.completed) {
         guard let current = context, current.ticket == ticket, endedTickets.insert(ticket).inserted else { return }
+        // Before what marks the session is taken away below - the call screens it closes save their
+        // call after that, and must still know whose call it was.
+        lastEndedAt = Date()
         SecureUserDefaults.shared.set(status, forKey: "ccEndStatus_\(ticket)")
         let start: String = SecureUserDefaults.shared.value(forKey: "startTimeCC") ?? ""
         let me = User.getMyPin() ?? ""
@@ -8040,7 +8268,7 @@ final class ContactCenterSession {
                     _ = try Database.shared.insertRecord(fmdb: fmdb, table: "CALL_CENTER_HISTORY", cvalues: [
                         "type": current.channel, "title": "Call Center".localized(), "time": start,
                         "f_pin": current.officer, "data": ticket, "time_end": "\(Date().currentTimeMillis())",
-                        "complaint_id": ticket, "members": "", "requester": current.requester
+                        "complaint_id": ticket, "members": CallParticipants.contactCenterMembers(ticket: ticket), "requester": current.requester
                     ], replace: true)
                 } catch { rollback.pointee = true }
             }
@@ -14168,6 +14396,14 @@ enum ChatMessageText {
     static func spoken(of message: [String: Any?]) -> String {
         let text = withoutLinkPreview(message[TypeDataMessage.message_text] as? String ?? "")
         if (message[TypeDataMessage.file_id] as? String ?? "").isEmpty {
+            return text
+        }
+        // Fix: a document's text with no "|" in it - only the caption, as Android sends one now,
+        // with the name in a field of its own - was read as having nothing written with it. The
+        // bubble shows all of it as the caption in that case, so the menu then offered no Copy,
+        // Forward, Translate, Chat Suggestion or Summarize under writing the reader could see.
+        // Read the way the bubble reads it: what follows the bar, or the whole of it without one.
+        guard text.contains("|") else {
             return text
         }
         return text.component(1, separatedBy: "|")

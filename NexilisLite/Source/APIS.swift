@@ -2151,8 +2151,24 @@ public class APIS: NSObject {
             }
         }
         else {
-            if Utils.getTokenCall().isEmpty || token != Utils.getTokenCall() {
+            let changed = Utils.getTokenCall().isEmpty || token != Utils.getTokenCall()
+            if changed {
                 Utils.setTokenCall(value: token)
+            }
+            // Fix: the VoIP token was only kept here and reached the server with the next APNs
+            // token. When it came in after that one had gone - a fresh install, a restore, a phone
+            // that hands the tokens over in the other order - the server went on pushing calls to
+            // the old token or to none, which only shows once the app is swiped away: while it is
+            // running, calls come over the socket. A new VoIP token is sent as soon as there is a
+            // connection, beside the APNs token the server already has.
+            let apnToken = Utils.getTokenAPN()
+            if changed || isResend, !apnToken.isEmpty {
+                DispatchQueue.global().async {
+                    while API.nGetCLXConnState() == 0 {
+                        Thread.sleep(forTimeInterval: 1)
+                    }
+                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getToken(token: apnToken, tokenCall: token))
+                }
             }
 //                DispatchQueue.global().async {
 //                    while API.nGetCLXConnState() == 0 {
@@ -2499,7 +2515,27 @@ public class APIS: NSObject {
         }
     }
     
-    public static func showNotificationCallKitNexilis(payload: [AnyHashable : Any], completion: @escaping () -> ()) {
+    public static func showNotificationCallKitNexilis(payload: [AnyHashable : Any], completion originalCompletion: @escaping () -> ()) {
+        // Fix: some VoIP pushes were finished without a call ever being reported to CallKit - one
+        // whose payload could not be read, a cancellation while the call screen was open. Since
+        // iOS 13 that is not allowed: the system ends the app, and after a few such pushes stops
+        // waking it for VoIP pushes at all - calls then never reach an app that has been swiped
+        // away. Where nothing has been reported and no call is on the books, a call is reported
+        // and ended at once, which is what the system asks for.
+        var reported = false
+        let completion: () -> () = {
+            reported = true
+            originalCompletion()
+        }
+        let reportIfNothingWas: () -> () = {
+            guard !reported else { return }
+            guard CallManager.shared.activeCalls.isEmpty else {
+                completion()
+                return
+            }
+            CallManager.shared.reportIncomingCall(uuid: UUID(), callerName: "", callerId: "voip-" + UUID().uuidString,
+                                                  isVideo: false, isAutoCancel: true, onReported: completion)
+        }
         if let messagePayload = payload["payload"] as? [String: Any] {
             if let message = messagePayload["message"] as? [String: Any] {
                 if let data = message["data"] as? [String: Any] {
@@ -2545,6 +2581,8 @@ public class APIS: NSObject {
                             dataMessage["call_cancel"] = true
                             dataMessage["pin"] = callCancel
                             NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.callFCM), object: nil, userInfo: dataMessage)
+                            reportIfNothingWas()
+                            return
                         } else {
                             CallManager.shared.reportIncomingCall(uuid: APIS.uuidCall ?? UUID(), callerName: callCancelName, callerId: callFrom, isVideo: callType != "1", isAutoCancel: true, onReported: completion)
                             let center = UNUserNotificationCenter.current()
@@ -2572,7 +2610,7 @@ public class APIS: NSObject {
                 }
             }
         }
-        completion()
+        reportIfNothingWas()
     }
     
     static func ackAPN(id: String) {

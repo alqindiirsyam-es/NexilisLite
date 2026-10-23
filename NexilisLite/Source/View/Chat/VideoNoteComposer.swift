@@ -84,7 +84,16 @@ public final class VideoNoteComposer: UIView {
     private var isCapturing = false
     /// The longest the first frame is waited for before recording starts anyway. Only a backstop:
     /// in practice the camera answers in a fraction of this.
-    private static let warmUpLimit: TimeInterval = 2.0
+    ///
+    /// Before iOS 16 there is no first frame to wait for (see configureSession: the probe cannot run
+    /// beside the movie file output there), so this is what starts the recording - a moment after
+    /// the session is running, which is about as long as the camera takes to warm up.
+    private static var warmUpLimit: TimeInterval {
+        if #available(iOS 16.0, *) {
+            return 2.0
+        }
+        return 0.6
+    }
     private var startedAt: Date?
     private var elapsed: TimeInterval = 0
     private var ticker: Timer?
@@ -747,7 +756,13 @@ public final class VideoNoteComposer: UIView {
         }
         session.addOutput(output)
 
-        if session.canAddOutput(probe) {
+        // Fix: on iOS 15 every video note failed with "camera gave no frames". Before iOS 16 a
+        // session cannot feed a movie file output and a video data output at the same time - it
+        // still says it can add the second one, and then that one simply never receives a frame.
+        // The probe waited for a first frame that could not come, and the note was called off as
+        // a camera that would not start. Only attached where the two can run together; elsewhere
+        // the recording starts on the warm-up backstop instead.
+        if #available(iOS 16.0, *), session.canAddOutput(probe) {
             probe.alwaysDiscardsLateVideoFrames = true
             probe.setSampleBufferDelegate(self, queue: probeQueue)
             session.addOutput(probe)

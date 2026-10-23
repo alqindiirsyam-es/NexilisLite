@@ -1609,9 +1609,10 @@ class IncomingThread {
                             "data" : complaintId,
                             "time_end" : date,
                             "complaint_id" : complaintId,
-                            "members" : "",
+                            "members" : CallParticipants.contactCenterMembers(ticket: complaintId),
                             "requester": requester
                         ], replace: true)
+                        ContactCenterSession.shared.noteSessionEnded()
                         SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
                         SecureUserDefaults.shared.removeValue(forKey: "membersCC")
                         SecureUserDefaults.shared.removeValue(forKey: "startTimeCC")

@@ -148,7 +148,7 @@ public class HistoryCCViewController: UITableViewController, QLPreviewController
         Database.shared.database?.inTransaction({ fmdb, rollback in
             do {
                 var data: [[String: Any?]] = []
-                if let cursorHistory = Database.shared.getRecords(fmdb: fmdb, query: "SELECT type, f_pin, complaint_id, time, time_end, requester FROM CALL_CENTER_HISTORY order by time desc") {
+                if let cursorHistory = Database.shared.getRecords(fmdb: fmdb, query: "SELECT type, f_pin, complaint_id, time, time_end, requester, members FROM CALL_CENTER_HISTORY order by time desc") {
                     while cursorHistory.next() {
                         var row: [String: Any?] = [:]
                         row["type"] = cursorHistory.string(forColumnIndex: 0)
@@ -157,6 +157,7 @@ public class HistoryCCViewController: UITableViewController, QLPreviewController
                         row["date_start"] = cursorHistory.string(forColumnIndex: 3)
                         row["date_end"] = cursorHistory.string(forColumnIndex: 4)
                         row["requester"] = cursorHistory.string(forColumnIndex: 5)
+                        row["members"] = cursorHistory.string(forColumnIndex: 6)
                         data.append(row)
                     }
                     cursorHistory.close()
@@ -193,7 +194,8 @@ public class HistoryCCViewController: UITableViewController, QLPreviewController
                                          start: Int64(row["date_start"] as? String ?? "") ?? 0,
                                          end: Int64(row["date_end"] as? String ?? "") ?? 0,
                                          officer: row["officer"] as? String ?? "",
-                                         requester: row["requester"] as? String ?? "")
+                                         requester: row["requester"] as? String ?? "",
+                                         members: row["members"] as? String ?? "")
         }
         navigationController?.show(editorGroupVC, sender: nil)
     }

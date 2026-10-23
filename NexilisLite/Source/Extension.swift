@@ -1624,13 +1624,15 @@ extension String {
             applyTextFormatting(to: finalText, sign: sign, attributes: attributes, isEditing: isEditing, boldItalicFont: boldItalicFont)
         }
         
-        processMentions(in: finalText, groupID: group_id, isEditing: isEditing, fontSize: fontSize, listMentionInTextField: listMentionInTextField)
+        let mentionsResolved = processMentions(in: finalText, groupID: group_id, isEditing: isEditing, fontSize: fontSize, listMentionInTextField: listMentionInTextField)
         
         if isSearching {
             highlightSearchText(in: finalText, searchText: textSearch)
         }
         
-        if let cacheKey = cacheKey {
+        // A mention left as a bare pin may only be waiting on the database - see MentionNames - and
+        // kept, it would stay a pin for as long as the message is cached.
+        if let cacheKey = cacheKey, mentionsResolved {
             String.richTextCache.setObject(NSAttributedString(attributedString: finalText), forKey: cacheKey)
         }
         return finalText
@@ -1806,9 +1808,12 @@ extension String {
     ///   rest of the string was set to, so wherever richText is asked for a different size - the
     ///   quote in a reply, for one - the mention came out at its own size in the middle of the
     ///   line. It follows the size it is given now.
-    private func processMentions(in text: NSMutableAttributedString, groupID: String, isEditing: Bool, fontSize: CGFloat, listMentionInTextField: [User] = []) {
+    /// - Returns: false when a mention found no name, and stays a pin.
+    @discardableResult
+    private func processMentions(in text: NSMutableAttributedString, groupID: String, isEditing: Bool, fontSize: CGFloat, listMentionInTextField: [User] = []) -> Bool {
         let regex = try? NSRegularExpression(pattern: "@([\\w-]+)", options: [])
         let matches = regex?.matches(in: text.string, options: [], range: NSRange(location: 0, length: text.length)) ?? []
+        var resolved = true
 
         for match in matches.reversed() {
             let range = match.range(at: 1)
@@ -1842,9 +1847,13 @@ extension String {
                             text.addAttribute(.mentionHighlight, value: UIColor.mentionColor.withAlphaComponent(0.16), range: newRange)
                         }
                     }
+                } else if username.range(of: "^[0-9a-fA-F]{8,}$", options: .regularExpression) != nil {
+                    // Shaped like a pin - not a word after an "@", as in an e-mail address.
+                    resolved = false
                 }
             }
         }
+        return resolved
     }
 
     /// Lights up what the search found - see ChatSearchMatch for the rule.
@@ -1879,21 +1888,41 @@ public extension NSAttributedString.Key {
 ///
 /// One lookup per person rather than one per row drawn: a mention is resolved every time a
 /// message is put on screen, and each resolution was a query of its own.
+///
+/// Fix: sometimes every mention in a chat showed as the bare pin ("@02f0ffcb2d") until the app
+/// was swiped away and opened again. A pin that found no name was remembered as nameless for the
+/// rest of the run - and a lookup finds nothing not only for a stranger, but whenever the
+/// database cannot be read at that moment (closed while the app was in the background, reading
+/// blocked offline - see OfflinePolicy) or the group's members are not on the device yet. Only
+/// names are kept now; a miss is kept for a few seconds, so drawing a page does not ask again row
+/// after row, and is not kept at all when nothing could be read.
 enum MentionNames {
     private static var cache: [String: String] = [:]
+    private static var misses: [String: Date] = [:]
+    private static let missLifetime: TimeInterval = 10
     private static let lock = NSLock()
 
     /// The name to show for a mention, or nil when the pin belongs to nobody known.
     static func name(forPin pin: String) -> String? {
         lock.lock()
         let known = cache[pin]
+        let missedAt = misses[pin]
         lock.unlock()
         if let known = known {
-            return known.isEmpty ? nil : known
+            return known
         }
+        if let missedAt = missedAt, Date().timeIntervalSince(missedAt) < missLifetime {
+            return nil
+        }
+        let readable = Database.shared.database != nil && !OfflinePolicy.isBlocking
         let resolved = Member.getMember(f_pin: pin)?.fullName.trimmingCharacters(in: .whitespaces) ?? ""
         lock.lock()
-        cache[pin] = resolved
+        if !resolved.isEmpty {
+            cache[pin] = resolved
+            misses[pin] = nil
+        } else if readable {
+            misses[pin] = Date()
+        }
         lock.unlock()
         return resolved.isEmpty ? nil : resolved
     }

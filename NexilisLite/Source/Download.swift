@@ -311,6 +311,23 @@ public class Download {
     // Fix: on failure the old code left the download registered forever, and the guard at
     // the top of startHTTP then silently swallowed every retry for that file until the app
     // was restarted.
+    private static let failureLock = NSLock()
+    private static var failures: [String: String] = [:]
+
+    static func recordFailure(filename: String, reason: String) {
+        failureLock.lock()
+        failures[filename] = reason
+        failureLock.unlock()
+    }
+
+    /// Why the last transfer of this file failed - an HTTP status, or the error underneath - so a
+    /// failure can be told apart on the screen; there is no console on a device.
+    public static func failureReason(for filename: String) -> String? {
+        failureLock.lock()
+        defer { failureLock.unlock() }
+        return failures[filename]
+    }
+
     private static func finish(filename: String, progress: Double) {
         var current: [(String, Double) -> ()] = []
         listenerQueue.sync {
@@ -479,8 +496,16 @@ public class Download {
                         Download.finish(filename: filename, progress: 100)
                     }
                     else {
-//                        let statusCode = result.response?.statusCode
-//                        print("Response fail: \(result.debugDescription)")
+                        // Why, for a screen that wants to say so - see failureReason(for:).
+                        let reason: String
+                        if let response = result.response {
+                            reason = "HTTP \(response.statusCode)"
+                        } else if let underlying = result.error?.underlyingError as NSError? {
+                            reason = "\(underlying.domain) \(underlying.code)"
+                        } else {
+                            reason = "no response"
+                        }
+                        Download.recordFailure(filename: filename, reason: reason)
                         Download.finish(filename: filename, progress: -100)
                     }
                 }

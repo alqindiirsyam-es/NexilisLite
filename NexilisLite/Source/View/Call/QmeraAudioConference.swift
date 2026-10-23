@@ -332,6 +332,7 @@ class QmeraAudioConference: UIViewController {
                             print("Access database error: \(error.localizedDescription)")
                         }
                     })
+                    ContactCenterSession.shared.noteSessionEnded()
                     SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
                     SecureUserDefaults.shared.removeValue(forKey: "membersCC")
                     SecureUserDefaults.shared.removeValue(forKey: "startTimeCC")
@@ -373,6 +374,7 @@ class QmeraAudioConference: UIViewController {
                     } else {
                         _ = Nexilis.write(message: CoreMessage_TMessageBank.endCallCenter(complaint_id: complaintId, l_pin: requester))
                     }
+                    ContactCenterSession.shared.noteSessionEnded()
                     SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
                     SecureUserDefaults.shared.removeValue(forKey: "membersCC")
                     SecureUserDefaults.shared.removeValue(forKey: "startTimeCC")
